@@ -1,0 +1,42 @@
+{
+  "id": "pf2e-combat-chronicle",
+  "title": "PF2e Combat Chronicle",
+  "description": "Automatic combat logger for PF2e — records encounters in structured JSON format for post-processing, tactical analysis, and GM reflection.",
+  "version": "0.1.0",
+  "compatibility": {
+    "minimum": "13",
+    "verified": "13.351"
+  },
+  "relationships": {
+    "systems": [
+      {
+        "id": "pf2e",
+        "type": "system",
+        "compatibility": {
+          "minimum": "7.11"
+        }
+      }
+    ]
+  },
+  "authors": [
+    {
+      "name": "vvechkanov",
+      "url": "https://github.com/vvechkanov"
+    }
+  ],
+  "esmodules": [
+    "scripts/module.js"
+  ],
+  "styles": [
+    "styles/chronicle.css"
+  ],
+  "languages": [
+    {
+      "lang": "en",
+      "name": "English",
+      "path": "lang/en.json"
+    }
+  ],
+  "url": "https://github.com/vvechkanov/pf2e-combat-chronicle",
+  "bugs": "https://github.com/vvechkanov/pf2e-combat-chronicle/issues"
+}
