@@ -1,4 +1,5 @@
 import { CombatTracker } from './combat-tracker.js';
+import { JournalWriter } from './journal-writer.js';
 
 const MODULE_ID = 'pf2e-combat-chronicle';
 
@@ -11,11 +12,20 @@ Hooks.once('ready', () => {
   console.log(`${MODULE_ID} | Ready (GM mode)`);
 
   const tracker = new CombatTracker();
+  const journalWriter = new JournalWriter();
 
   game.combatChronicle = {
     tracker,
+    journalWriter,
     get currentEncounter() { return tracker.currentEncounter; },
     lastEncounter: null,
+    async saveLastEncounter() {
+      if (!this.lastEncounter) {
+        console.warn(`${MODULE_ID} | No last encounter to save`);
+        return null;
+      }
+      return journalWriter.saveEncounter(this.lastEncounter);
+    },
   };
 
   Hooks.on('combatStart', (combat, updateData) => {
@@ -30,8 +40,9 @@ Hooks.once('ready', () => {
     tracker.onRoundChange(combat, updateData, updateOptions);
   });
 
-  Hooks.on('deleteCombat', (combat, options, userId) => {
+  Hooks.on('deleteCombat', async (combat, options, userId) => {
     tracker.endCombat(combat, options, userId);
+    await journalWriter.saveEncounter(game.combatChronicle.lastEncounter);
   });
 
   Hooks.on('updateActor', (actor, changes, options, userId) => {
