@@ -265,6 +265,7 @@ function computeHitRate(actorActions) {
   let total = 0;
   for (const action of actorActions) {
     if (!action.degree_of_success) continue;
+    if (action.action_type !== 'strike' && action.action_type !== 'spell') continue;
     total++;
     if (action.degree_of_success === 'success' || action.degree_of_success === 'critical-success') {
       hits++;

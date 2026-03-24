@@ -75,11 +75,11 @@ export class MessageParser {
       damage_dealt: null,
       damage_type: null,
       healing_done: null,
-      map_penalty: context.mapIncreases ?? null,
+      map_penalty: this.#extractMapPenalty(context),
       notes: null,
       title: cleanTitle,
       dc: context.dc ? { value: context.dc.value, slug: context.dc.slug ?? null } : null,
-      save_type: contextType === 'saving-throw' ? (pf2e.modifierName ?? null) : null,
+      save_type: contextType === 'saving-throw' ? (context.statistic ?? context.slug ?? null) : null,
       item_img: origin.img ?? origin.item?.img ?? null,
       item_description: this.#extractDescription(origin),
     };
@@ -104,7 +104,7 @@ export class MessageParser {
     return {
       _type: 'damage-enrichment',
       damage_dealt: isHealing ? null : total,
-      damage_type: this.#extractDamageType(roll),
+      damage_type: this.#extractDamageType(roll, pf2e),
       healing_done: isHealing ? total : null,
       targets,
       roll_result: total,
@@ -148,10 +148,7 @@ export class MessageParser {
   #classifyAction(pf2e, contextType, origin) {
     const originType = origin.type ?? null;
 
-    // Spell attack rolls
-    if (contextType === 'spell-attack-roll') return 'spell';
-
-    // Regular attack rolls — spell origins are spells, everything else is a strike
+    // Attack rolls — spell origins are spells, everything else is a strike
     if (contextType === 'attack-roll') {
       return originType === 'spell' ? 'spell' : 'strike';
     }
@@ -159,8 +156,13 @@ export class MessageParser {
     // Spell casting (non-attack spells like buffs/heals)
     if (originType === 'spell' || pf2e.casting) return 'spell';
 
-    // Skill checks
-    if (contextType === 'skill-check') return 'skill';
+    // Skill checks and perception checks
+    if (contextType === 'skill-check' || contextType === 'perception-check') return 'skill';
+
+    // Counteract checks (Dispel Magic, etc.)
+    if (contextType === 'counteract-check') {
+      return originType === 'spell' ? 'spell' : 'skill';
+    }
 
     // Move and interact — check origin slug or slugified name
     const slug = origin.slug ?? this.#slugify(origin.name);
@@ -250,17 +252,6 @@ export class MessageParser {
       return actorId ? [{ actor_id: actorId }] : null;
     }
 
-    // Array of targets
-    if (Array.isArray(target)) {
-      const results = target
-        .map(t => {
-          const id = this.#extractActorIdFromUUID(t.actor);
-          return id ? { actor_id: id } : null;
-        })
-        .filter(Boolean);
-      return results.length > 0 ? results : null;
-    }
-
     return null;
   }
 
@@ -276,10 +267,10 @@ export class MessageParser {
     // Primary: DamageRoll.kinds Set contains 'healing' (most reliable)
     if (roll?.kinds?.has?.('healing')) return true;
 
-    // Fallback: context.traits includes healing/vitality trait slugs
-    const contextTraits = pf2e.context?.traits;
-    if (Array.isArray(contextTraits)) {
-      if (contextTraits.includes('healing') || contextTraits.includes('vitality')) return true;
+    // Fallback: damageRoll.traits includes healing/vitality trait slugs
+    const damageRollTraits = pf2e.damageRoll?.traits;
+    if (Array.isArray(damageRollTraits)) {
+      if (damageRollTraits.includes('healing') || damageRollTraits.includes('vitality')) return true;
     }
 
     // Fallback: roll options contain item:trait:healing
@@ -291,15 +282,20 @@ export class MessageParser {
     return false;
   }
 
-  #extractDamageType(roll) {
-    // PF2e damage rolls may contain damage type info in the roll's options or terms
+  #extractDamageType(roll, pf2e = null) {
     if (!roll) return null;
 
-    // Check roll options for damage type
-    const options = roll.options ?? {};
-    if (options.damageType) return options.damageType;
+    // Primary: DamageInstance type from PF2e DamageRoll
+    if (roll.instances?.[0]?.type) return roll.instances[0].type;
 
-    // Check first damage term for type flavor
+    // Secondary: flags.pf2e.damageRoll.types keys (damage type → category → value)
+    const types = pf2e?.damageRoll?.types;
+    if (types) {
+      const typeKeys = Object.keys(types);
+      if (typeKeys.length > 0) return typeKeys[0];
+    }
+
+    // Fallback: first term flavor
     const term = roll.terms?.[0];
     if (term?.flavor) return term.flavor;
 
@@ -315,6 +311,20 @@ export class MessageParser {
       criticalFailure: 'critical-failure',
     };
     return map[outcome] ?? outcome;
+  }
+
+  #extractMapPenalty(context) {
+    // mapIncreases exists directly in damage context
+    if (context.mapIncreases != null) return context.mapIncreases;
+    // For attack rolls, parse from context.options array (e.g. "map:increases:1")
+    const options = context.options;
+    if (Array.isArray(options)) {
+      for (const opt of options) {
+        const match = opt.match?.(/^map:increases:(\d+)$/);
+        if (match) return Number(match[1]);
+      }
+    }
+    return null;
   }
 
   #slugify(name) {

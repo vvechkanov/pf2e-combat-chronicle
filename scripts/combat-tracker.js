@@ -473,7 +473,22 @@ export class CombatTracker {
   }
 
   #enrichLastAction(turn, enrichment) {
-    // Walk backward to find the most recent action without damage data
+    // First pass: match by strike_name against item_name/action_name
+    if (enrichment.strike_name) {
+      for (let i = turn.actions.length - 1; i >= 0; i--) {
+        const action = turn.actions[i];
+        if (action.damage_dealt !== null || action.healing_done !== null) continue;
+        if (action.item_name === enrichment.strike_name ||
+            action.action_name === enrichment.strike_name) {
+          action.damage_dealt = enrichment.damage_dealt;
+          action.damage_type = enrichment.damage_type;
+          action.healing_done = enrichment.healing_done;
+          return;
+        }
+      }
+    }
+
+    // Second pass: fall back to most recent action without damage data
     for (let i = turn.actions.length - 1; i >= 0; i--) {
       const action = turn.actions[i];
       if (action.damage_dealt === null && action.healing_done === null) {
@@ -483,12 +498,13 @@ export class CombatTracker {
         return;
       }
     }
+
     // No matching action — create standalone damage entry
     turn.actions.push({
       action_name: enrichment.healing_done ? 'Healing' : 'Damage',
       action_cost: 0,
       action_type: 'other',
-      item_name: null,
+      item_name: enrichment.strike_name ?? null,
       item_type: null,
       targets: enrichment.targets,
       roll_result: enrichment.roll_result,

@@ -11,11 +11,14 @@ Review of all parsing code against the official PF2e system source code (`foundr
 
 ## Summary
 
-| Severity | Count | Description |
-|----------|-------|-------------|
-| HIGH     | 1     | save_type always null — wrong data path |
-| MEDIUM   | 4     | Incorrect data paths, wrong type assumptions |
-| LOW      | 9     | Dead code, missing context types, minor inaccuracies |
+| Severity | Count | Status | Description |
+|----------|-------|--------|-------------|
+| HIGH     | 1     | ✅ Fixed | save_type always null — wrong data path |
+| MEDIUM   | 4     | ✅ Fixed | Incorrect data paths, wrong type assumptions |
+| LOW      | 9     | 5 fixed, 3 deferred, 1 N/A | Dead code, missing context types, minor inaccuracies |
+
+**Fixed issues:** 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 13
+**Deferred:** 11 (effect tracker buff type), 12 (negativeHealing), 14 (XP party size)
 
 ---
 
