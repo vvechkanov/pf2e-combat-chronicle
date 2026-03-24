@@ -50,4 +50,10 @@ Hooks.once('ready', () => {
       tracker.onActorHPUpdate(actor, changes);
     }
   });
+
+  Hooks.on('updateToken', (token, changes, options, userId) => {
+    if (('x' in changes) || ('y' in changes)) {
+      tracker.onTokenMove(token, changes);
+    }
+  });
 });
