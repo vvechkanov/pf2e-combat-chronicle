@@ -5,6 +5,33 @@ const MODULE_ID = 'pf2e-combat-chronicle';
 
 Hooks.once('init', () => {
   console.log(`${MODULE_ID} | Initializing`);
+
+  game.settings.register(MODULE_ID, 'autoSave', {
+    name: `${MODULE_ID}.settings.autoSave.name`,
+    hint: `${MODULE_ID}.settings.autoSave.hint`,
+    scope: 'world',
+    config: true,
+    type: Boolean,
+    default: true,
+  });
+
+  game.settings.register(MODULE_ID, 'generateReadableJournal', {
+    name: `${MODULE_ID}.settings.generateReadableJournal.name`,
+    hint: `${MODULE_ID}.settings.generateReadableJournal.hint`,
+    scope: 'world',
+    config: true,
+    type: Boolean,
+    default: true,
+  });
+
+  game.settings.register(MODULE_ID, 'journalFolderName', {
+    name: `${MODULE_ID}.settings.journalFolderName.name`,
+    hint: `${MODULE_ID}.settings.journalFolderName.hint`,
+    scope: 'world',
+    config: true,
+    type: String,
+    default: 'Combat Chronicle',
+  });
 });
 
 Hooks.once('ready', () => {
@@ -51,7 +78,9 @@ Hooks.once('ready', () => {
 
   Hooks.on('deleteCombat', async (combat, options, userId) => {
     tracker.endCombat(combat, options, userId);
-    await journalWriter.saveEncounter(game.combatChronicle.lastEncounter);
+    if (game.settings.get(MODULE_ID, 'autoSave')) {
+      await journalWriter.saveEncounter(game.combatChronicle.lastEncounter);
+    }
   });
 
   Hooks.on('updateActor', (actor, changes, options, userId) => {
