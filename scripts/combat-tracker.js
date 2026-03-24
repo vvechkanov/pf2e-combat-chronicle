@@ -122,6 +122,9 @@ export class CombatTracker {
     const result = this.#messageParser.parse(message);
     if (!result) return;
 
+    // Resolve target actor_ids to names
+    this.#resolveTargetNames(result, combat);
+
     const currentTurn = this.#getCurrentTurn();
     if (!currentTurn) return;
 
@@ -473,6 +476,18 @@ export class CombatTracker {
       map_penalty: null,
       notes: 'standalone damage roll',
     });
+  }
+
+  #resolveTargetNames(result, combat) {
+    const targets = result.targets;
+    if (!targets) return;
+    for (const target of targets) {
+      if (target.actor_id && !target.name) {
+        target.name = game.actors?.get(target.actor_id)?.name
+          ?? combat.combatants?.find(c => c.actor?.id === target.actor_id)?.name
+          ?? null;
+      }
+    }
   }
 
   #trimForwardData(targetRound, targetTurnIndex) {

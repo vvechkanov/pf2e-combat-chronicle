@@ -44,6 +44,11 @@ export class MessageParser {
       return this.#parseDamageRoll(message, pf2e);
     }
 
+    // damage-taken messages: extract appliedDamage info
+    if (contextType === 'damage-taken') {
+      return this.#parseDamageTaken(message, pf2e);
+    }
+
     // Require either a roll or an origin to treat as an action
     const origin = pf2e.origin ?? {};
     if (!message.isRoll && !origin.type) return null;
@@ -68,6 +73,10 @@ export class MessageParser {
       healing_done: null,
       map_penalty: context.mapIncreases ?? null,
       notes: null,
+      // New fields
+      title: context.title ?? null,
+      dc: context.dc ? { value: context.dc.value, slug: context.dc.slug ?? null } : null,
+      save_type: contextType === 'saving-throw' ? (pf2e.modifierName ?? null) : null,
     };
   }
 
@@ -94,6 +103,40 @@ export class MessageParser {
       healing_done: isHealing ? total : null,
       targets,
       roll_result: total,
+      strike_name: pf2e.strike?.name ?? null,
+    };
+  }
+
+  #parseDamageTaken(message, pf2e) {
+    const applied = pf2e.appliedDamage;
+    if (!applied) return null;
+
+    return {
+      action_name: 'damage-taken',
+      action_cost: 0,
+      action_type: 'other',
+      item_name: null,
+      item_type: null,
+      targets: null,
+      roll_result: null,
+      roll_formula: null,
+      degree_of_success: null,
+      damage_dealt: null,
+      damage_type: null,
+      healing_done: null,
+      map_penalty: null,
+      notes: null,
+      title: null,
+      dc: null,
+      save_type: null,
+      // damage-taken specific fields
+      applied_damage: {
+        target_uuid: applied.uuid ?? null,
+        is_healing: applied.isHealing ?? false,
+        shield: applied.shield ?? null,
+        persistent: applied.persistent ?? [],
+        final_hp: applied.updates?.find(u => u.path === 'system.attributes.hp.value')?.value ?? null,
+      },
     };
   }
 
@@ -130,22 +173,36 @@ export class MessageParser {
   }
 
   #extractTargets(pf2e) {
-    const target = pf2e.target;
+    // Check context.target first (where PF2e v7.11+ puts target info)
+    const target = pf2e.context?.target ?? pf2e.target;
     if (!target) return null;
 
-    // Single target object with actor or token name
-    const name = target.name ?? target.actor?.name ?? target.token?.name ?? null;
-    if (name) return [name];
+    // Single target object with actor UUID
+    if (target.actor) {
+      const actorId = this.#extractActorIdFromUUID(target.actor);
+      return actorId ? [{ actor_id: actorId }] : null;
+    }
 
     // Array of targets
     if (Array.isArray(target)) {
-      const names = target
-        .map(t => t.name ?? t.actor?.name ?? t.token?.name ?? null)
+      const results = target
+        .map(t => {
+          const id = this.#extractActorIdFromUUID(t.actor);
+          return id ? { actor_id: id } : null;
+        })
         .filter(Boolean);
-      return names.length > 0 ? names : null;
+      return results.length > 0 ? results : null;
     }
 
     return null;
+  }
+
+  #extractActorIdFromUUID(uuid) {
+    if (!uuid) return null;
+    // "Actor.U7bM8NEzGa8ZDZrd" → "U7bM8NEzGa8ZDZrd"
+    // "Scene.xxx.Token.xxx.Actor.HnVo1YGcyvJ2l5Sq" → "HnVo1YGcyvJ2l5Sq"
+    const match = uuid.match(/Actor\.([^.]+)$/);
+    return match?.[1] ?? null;
   }
 
   #isHealingRoll(pf2e) {

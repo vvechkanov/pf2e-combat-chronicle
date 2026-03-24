@@ -286,7 +286,7 @@ function computeTimesTargeted(allActions, actorName, actorId) {
   let count = 0;
   for (const action of allActions) {
     if (action.actor_id === actorId) continue; // don't count self-targeting
-    if (action.targets && action.targets.includes(actorName)) {
+    if (action.targets && action.targets.some(t => t.name === actorName)) {
       count++;
     }
   }
@@ -298,7 +298,7 @@ function computeDodgeMaster(allActions, actorName, actorId) {
   let total = 0;
   for (const action of allActions) {
     if (action.actor_id === actorId) continue;
-    if (!action.targets || !action.targets.includes(actorName)) continue;
+    if (!action.targets || !action.targets.some(t => t.name === actorName)) continue;
     if (!action.degree_of_success) continue;
     total++;
     if (action.degree_of_success === 'failure' || action.degree_of_success === 'critical-failure') {
@@ -318,7 +318,8 @@ function computeClutchHeals(actorActions, allTurns, actorId, threshold) {
     const turn = action._turn;
     if (!turn) continue;
 
-    for (const targetName of action.targets) {
+    for (const { name: targetName } of action.targets) {
+      if (!targetName) continue;
       const matchingChange = turn.hp_changes.find(
         c => c.actor_name === targetName && c.delta > 0 && c.hp_max > 0 && c.hp_before / c.hp_max <= threshold
       );
@@ -338,7 +339,8 @@ function computeRevives(actorActions, allTurns, actorId) {
     const turn = action._turn;
     if (!turn) continue;
 
-    for (const targetName of action.targets) {
+    for (const { name: targetName } of action.targets) {
+      if (!targetName) continue;
       const matchingChange = turn.hp_changes.find(
         c => c.actor_name === targetName && c.delta > 0 && c.hp_before === 0
       );
@@ -358,7 +360,8 @@ function computeOneShots(actorActions, allTurns, actorId) {
     const turn = action._turn;
     if (!turn) continue;
 
-    for (const targetName of action.targets) {
+    for (const { name: targetName } of action.targets) {
+      if (!targetName) continue;
       const matchingChange = turn.hp_changes.find(
         c => c.actor_name === targetName && c.hp_after === 0 && c.hp_before === c.hp_max && c.hp_before > 0
       );
