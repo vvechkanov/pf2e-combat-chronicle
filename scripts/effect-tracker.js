@@ -215,6 +215,29 @@ export class EffectTracker {
   }
 
   /**
+   * Serialize internal state for persistence.
+   * @returns {{baselines: Array, pendingEvents: Array, preUpdateValues: Array}}
+   */
+  serialize() {
+    return {
+      baselines: Array.from(this.#baselines.entries()),
+      pendingEvents: this.#pendingEvents,
+      preUpdateValues: Array.from(this.#preUpdateValues.entries()),
+    };
+  }
+
+  /**
+   * Restore internal state from serialized data.
+   * @param {object} data — output of serialize()
+   */
+  restoreState(data) {
+    if (!data) return;
+    this.#baselines = new Map(data.baselines ?? []);
+    this.#pendingEvents = data.pendingEvents ?? [];
+    this.#preUpdateValues = new Map(data.preUpdateValues ?? []);
+  }
+
+  /**
    * Clear all tracked state (call when combat ends).
    */
   reset() {

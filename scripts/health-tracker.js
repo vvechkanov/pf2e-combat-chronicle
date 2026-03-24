@@ -93,6 +93,27 @@ export class HealthTracker {
   }
 
   /**
+   * Serialize internal state for persistence.
+   * @returns {{previousHP: Array, pendingChanges: Array}}
+   */
+  serialize() {
+    return {
+      previousHP: Array.from(this.#previousHP.entries()),
+      pendingChanges: [...this.#pendingChanges],
+    };
+  }
+
+  /**
+   * Restore internal state from serialized data.
+   * @param {object} data — output of serialize()
+   */
+  restoreState(data) {
+    if (!data) return;
+    this.#previousHP = new Map(data.previousHP ?? []);
+    this.#pendingChanges = data.pendingChanges ?? [];
+  }
+
+  /**
    * Clear all tracked state (call when combat ends).
    */
   reset() {

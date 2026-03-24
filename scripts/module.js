@@ -14,6 +14,15 @@ Hooks.once('ready', () => {
   const tracker = new CombatTracker();
   const journalWriter = new JournalWriter();
 
+  // Restore in-progress combat state if page was reloaded mid-combat
+  if (game.combat) {
+    try {
+      tracker.restoreState(game.combat);
+    } catch (err) {
+      console.error(`${MODULE_ID} | Failed to restore combat state`, err);
+    }
+  }
+
   game.combatChronicle = {
     tracker,
     journalWriter,
@@ -65,5 +74,9 @@ Hooks.once('ready', () => {
 
   Hooks.on('updateItem', (item, changes, options, userId) => {
     tracker.onItemUpdated(item, changes, options, userId);
+  });
+
+  Hooks.on('createChatMessage', (message, options, userId) => {
+    tracker.onChatMessage(message);
   });
 });
