@@ -191,8 +191,9 @@ function groupTurnActions(actions) {
  */
 function isFollowUpAction(action) {
   if (action.action_name === 'damage-taken') return true;
-  if (action.action_name === 'Unknown') return true;
   if (action.notes === 'standalone damage roll') return true;
+  // Only treat Unknown as follow-up when it's truly ancillary (no type, no cost)
+  if (action.action_name === 'Unknown' && action.action_type === 'other' && !action.action_cost) return true;
   return false;
 }
 
@@ -283,28 +284,63 @@ function formatAction(action, hpChanges, actorNames) {
     fragments.push(`<span class="cc-degree cc-degree--${action.degree_of_success}">${degreeLabel}</span>`);
   }
 
-  // Damage
+  // Detect healing misclassified as damage: damage_dealt is set but hp_change delta is positive
+  const hpDelta = findActualHPDelta(action, hpChanges);
+  const isMisclassifiedHealing = action.damage_dealt > 0 && action.healing_done === null && hpDelta !== null && hpDelta > 0;
+
+  // Damage (or misclassified healing shown as healing)
   if (action.damage_dealt !== null && action.damage_dealt !== undefined) {
-    const dmgType = action.damage_type ? ` ${escapeHTML(action.damage_type)}` : '';
-    let dmgStr = `${action.damage_dealt}${dmgType}`;
-
-    const actualDelta = findActualHPDelta(action, hpChanges);
-    if (actualDelta !== null && Math.abs(actualDelta) !== action.damage_dealt) {
-      const actual = Math.abs(actualDelta);
-      const resisted = action.damage_dealt - actual;
-      if (resisted > 0) {
-        dmgStr += ` (${actual} HP lost, ${resisted} resisted)`;
-      } else {
-        dmgStr += ` (${actual} HP lost)`;
+    if (isMisclassifiedHealing) {
+      // Show as healing instead of damage — parser failed to detect healing trait
+      const hpChange = findHPChange(action, hpChanges);
+      let healStr = `healed ${action.damage_dealt} HP`;
+      if (hpChange) {
+        healStr += ` (HP ${hpChange.hp_before}→${hpChange.hp_after})`;
       }
-    }
+      // Show target name from hp_changes if action has no targets
+      if (!action.targets?.length && hpChange?.actor_name) {
+        fragments.push(`→ <span class="cc-target">${escapeHTML(hpChange.actor_name)}</span>`);
+      }
+      fragments.push(`<span class="cc-healing">${healStr}</span>`);
+    } else {
+      const dmgType = action.damage_type ? ` ${escapeHTML(action.damage_type)}` : '';
+      let dmgStr = `${action.damage_dealt}${dmgType}`;
 
-    fragments.push(`<span class="cc-damage">${dmgStr}</span>`);
+      const hpChange = findHPChange(action, hpChanges);
+      if (hpDelta !== null && Math.abs(hpDelta) !== action.damage_dealt) {
+        const actual = Math.abs(hpDelta);
+        const resisted = action.damage_dealt - actual;
+        // Show resistance info combined with HP transition
+        if (resisted > 0 && hpChange) {
+          dmgStr += ` (${resisted} resisted, HP ${hpChange.hp_before}→${hpChange.hp_after})`;
+        } else if (resisted > 0) {
+          dmgStr += ` (${actual} HP lost, ${resisted} resisted)`;
+        } else if (hpChange) {
+          dmgStr += ` (HP ${hpChange.hp_before}→${hpChange.hp_after})`;
+        } else {
+          dmgStr += ` (${actual} HP lost)`;
+        }
+      } else if (hpChange) {
+        // No resistance — just show HP transition
+        dmgStr += ` (HP ${hpChange.hp_before}→${hpChange.hp_after})`;
+      }
+
+      fragments.push(`<span class="cc-damage">${dmgStr}</span>`);
+    }
   }
 
   // Healing
   if (action.healing_done !== null && action.healing_done !== undefined) {
-    fragments.push(`<span class="cc-healing">healed ${action.healing_done} HP</span>`);
+    let healStr = `healed ${action.healing_done} HP`;
+    const hpChange = findHPChange(action, hpChanges);
+    if (hpChange) {
+      healStr += ` (HP ${hpChange.hp_before}→${hpChange.hp_after})`;
+    }
+    // Show target name from hp_changes if action has no targets
+    if (!action.targets?.length && hpChange?.actor_name) {
+      fragments.push(`→ <span class="cc-target">${escapeHTML(hpChange.actor_name)}</span>`);
+    }
+    fragments.push(`<span class="cc-healing">${healStr}</span>`);
   }
 
   // Persistent damage
@@ -379,14 +415,31 @@ function formatFollowUp(action, actorNames) {
  * Find actual HP delta for a damage action by matching targets against hp_changes.
  */
 function findActualHPDelta(action, hpChanges) {
-  if (!hpChanges?.length || !action.targets?.length) return null;
+  const hpChange = findHPChange(action, hpChanges);
+  return hpChange?.delta ?? null;
+}
+
+/**
+ * Find the HP change record matching an action's target.
+ * If the action has explicit targets, match by name. Otherwise, if there's
+ * only one hp_change entry, return it as a best-effort match.
+ */
+function findHPChange(action, hpChanges) {
+  if (!hpChanges?.length) return null;
   if (action.damage_dealt === null && action.healing_done === null) return null;
 
-  for (const target of action.targets) {
-    const targetName = target.name ?? null;
-    if (!targetName) continue;
-    const match = hpChanges.find(hc => hc.actor_name === targetName);
-    if (match) return match.delta;
+  if (action.targets?.length) {
+    for (const target of action.targets) {
+      const targetName = target.name ?? null;
+      if (!targetName) continue;
+      const match = hpChanges.find(hc => hc.actor_name === targetName);
+      if (match) return match;
+    }
+  }
+
+  // No explicit targets — if there's exactly one hp_change, use it as best-effort
+  if (!action.targets?.length && hpChanges.length === 1) {
+    return hpChanges[0];
   }
 
   return null;
@@ -421,11 +474,19 @@ function formatEffectChanges(turn) {
   const gained = turn.effects_gained ?? [];
   const lost = turn.effects_lost ?? [];
   const changed = turn.effects_changed ?? [];
+  const effectEvents = turn.effect_events ?? [];
+  const turnActorId = turn.actor_id;
 
-  if (gained.length === 0 && lost.length === 0 && changed.length === 0) return null;
+  // Collect effect events on OTHER actors (aura effects, etc.)
+  const otherActorEvents = effectEvents.filter(
+    e => e.actor_id && e.actor_id !== turnActorId
+  );
+
+  if (gained.length === 0 && lost.length === 0 && changed.length === 0 && otherActorEvents.length === 0) return null;
 
   const parts = [];
 
+  // Self-effects (gained/lost/changed)
   for (const name of gained) {
     parts.push(`<div class="cc-follow-up"><span class="cc-effect-gained">+${escapeHTML(name)}</span></div>`);
   }
@@ -436,6 +497,22 @@ function formatEffectChanges(turn) {
 
   for (const change of changed) {
     parts.push(`<div class="cc-follow-up"><span class="cc-effect-changed">${escapeHTML(change.name)} ${change.from}→${change.to}</span></div>`);
+  }
+
+  // Effects on OTHER actors (auras, emanations, etc.)
+  for (const event of otherActorEvents) {
+    const actorLabel = escapeHTML(event.actor_name ?? event.actor_id);
+    const effectLabel = escapeHTML(event.effect_name);
+    if (event.event_type === 'applied') {
+      parts.push(`<div class="cc-follow-up"><span class="cc-effect-gained">${actorLabel} +${effectLabel}</span></div>`);
+    } else if (event.event_type === 'removed') {
+      parts.push(`<div class="cc-follow-up"><span class="cc-effect-lost">${actorLabel} -${effectLabel}</span></div>`);
+    } else if (event.event_type === 'changed') {
+      const valStr = event.old_value !== null && event.new_value !== null
+        ? ` ${event.old_value}→${event.new_value}`
+        : '';
+      parts.push(`<div class="cc-follow-up"><span class="cc-effect-changed">${actorLabel} ${effectLabel}${valStr}</span></div>`);
+    }
   }
 
   return `<div class="cc-action-group cc-action-group--other">${parts.join('\n')}</div>`;
