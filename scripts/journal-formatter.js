@@ -345,11 +345,9 @@ function formatAction(action, hpChanges, actorNames) {
 
   // Persistent damage
   if (action.applied_damage?.persistent?.length) {
-    const persistentParts = action.applied_damage.persistent.map(p => {
-      const type = p.damageType ? escapeHTML(p.damageType) : '';
-      const formula = p.formula ? escapeHTML(p.formula) : '';
-      return `${formula} ${type}`.trim();
-    }).filter(Boolean);
+    const persistentParts = action.applied_damage.persistent
+      .filter(Boolean)
+      .map(p => escapeHTML(String(p)));
     if (persistentParts.length) {
       fragments.push(`<span class="cc-persistent">persistent: ${persistentParts.join(', ')}</span>`);
     }
@@ -381,18 +379,17 @@ function formatFollowUp(action, actorNames) {
 
   const parts = [];
 
-  // Shield block info
-  if (applied.shield && applied.shield > 0) {
-    parts.push(`shield blocked ${applied.shield}`);
+  // Shield block info (PF2e: {id, damage} object or legacy number)
+  const shieldDamage = typeof applied.shield === 'object' ? applied.shield?.damage : applied.shield;
+  if (shieldDamage && shieldDamage > 0) {
+    parts.push(`shield blocked ${shieldDamage}`);
   }
 
   // Persistent damage
   if (applied.persistent?.length) {
-    const persistentParts = applied.persistent.map(p => {
-      const type = p.damageType ? escapeHTML(p.damageType) : '';
-      const formula = p.formula ? escapeHTML(p.formula) : '';
-      return `${formula} ${type}`.trim();
-    }).filter(Boolean);
+    const persistentParts = applied.persistent
+      .filter(Boolean)
+      .map(p => escapeHTML(String(p)));
     if (persistentParts.length) {
       parts.push(`persistent: ${persistentParts.join(', ')}`);
     }
