@@ -59,4 +59,8 @@ Hooks.once('ready', () => {
       tracker.onActorHPUpdate(actor, changes);
     }
   });
+
+  Hooks.on('createChatMessage', (message, options, userId) => {
+    tracker.onChatMessage(message);
+  });
 });
