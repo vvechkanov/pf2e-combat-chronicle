@@ -1,4 +1,5 @@
 import { HealthTracker } from './health-tracker.js';
+import { EffectTracker } from './effect-tracker.js';
 
 const MODULE_ID = 'pf2e-combat-chronicle';
 
@@ -6,6 +7,7 @@ export class CombatTracker {
   #encounter = null;
   #combatId = null;
   #healthTracker = new HealthTracker();
+  #effectTracker = new EffectTracker();
 
   get currentEncounter() {
     return this.#encounter;
@@ -38,6 +40,7 @@ export class CombatTracker {
     // Initialize HP baselines for all combatants
     for (const c of combat.turns) {
       if (c.actor) this.#healthTracker.initBaseline(c.actor);
+      if (c.actor) this.#effectTracker.initBaseline(c.actor);
     }
 
     this.#ensureRound(combat);
@@ -58,8 +61,9 @@ export class CombatTracker {
       this.#trimForwardData(current.round, current.turn);
     }
 
-    // Finalize HP for the previous turn
+    // Finalize HP and effects for the previous turn
     this.#finalizeCurrentTurnHP(combat, prior.round);
+    this.#finalizeCurrentTurnEffects(combat, prior.round);
 
     this.#ensureRound(combat);
     this.#ensureTurn(combat);
@@ -83,8 +87,9 @@ export class CombatTracker {
   endCombat(combat, options, userId) {
     if (!this.#encounter || combat.id !== this.#combatId) return;
 
-    // Finalize HP for the last active turn
+    // Finalize HP and effects for the last active turn
     this.#finalizeCurrentTurnHP(combat, combat.round);
+    this.#finalizeCurrentTurnEffects(combat, combat.round);
 
     this.#encounter.ended_at = new Date().toISOString();
 
@@ -95,6 +100,7 @@ export class CombatTracker {
     game.combatChronicle.lastEncounter = structuredClone(this.#encounter);
 
     this.#healthTracker.reset();
+    this.#effectTracker.reset();
     this.#encounter = null;
     this.#combatId = null;
   }
@@ -121,9 +127,11 @@ export class CombatTracker {
 
     const actor = combatant.actor;
     const hpSnap = actor ? this.#healthTracker.snapshotHP(actor) : null;
+    const effectsSnap = actor ? this.#effectTracker.snapshotEffects(actor) : [];
 
-    // Initialize HP baseline for this actor's turn
+    // Initialize HP and effects baselines for this actor's turn
     if (actor) this.#healthTracker.initBaseline(actor);
+    if (actor) this.#effectTracker.initBaseline(actor);
 
     const turn = {
       combatant_name: combatant.name,
@@ -135,6 +143,11 @@ export class CombatTracker {
       hp_end: null,
       temp_hp_end: null,
       hp_changes: [],
+      effects_start: effectsSnap,
+      effects_end: [],
+      effects_gained: [],
+      effects_lost: [],
+      effects_changed: [],
       actions: [],
       chat_messages: [],
     };
@@ -163,6 +176,28 @@ export class CombatTracker {
 
     // Attach accumulated HP change events to this turn
     turn.hp_changes = this.#healthTracker.drainChanges();
+  }
+
+  /**
+   * Finalize effects end snapshot and compute diff for the current turn.
+   * @param {Combat} combat
+   * @param {number} roundNum — the round of the turn being finalized
+   */
+  #finalizeCurrentTurnEffects(combat, roundNum) {
+    const round = this.#encounter.rounds.find(r => r.round_number === roundNum);
+    if (!round || round.turns.length === 0) return;
+
+    const turn = round.turns[round.turns.length - 1];
+    if (turn.effects_end.length > 0) return; // already finalized
+
+    const actor = game.actors?.get(turn.actor_id);
+    if (actor) {
+      turn.effects_end = this.#effectTracker.snapshotEffects(actor);
+      const diff = this.#effectTracker.computeDiff(turn.actor_id, turn.effects_end);
+      turn.effects_gained = diff.effects_gained;
+      turn.effects_lost = diff.effects_lost;
+      turn.effects_changed = diff.effects_changed;
+    }
   }
 
   #trimForwardData(targetRound, targetTurnIndex) {
