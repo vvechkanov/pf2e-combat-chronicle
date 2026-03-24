@@ -13,6 +13,10 @@
       "journalFolderName": {
         "name": "Journal folder name",
         "hint": "Name of the folder where encounter journals are stored."
+      },
+      "rawDataCollection": {
+        "name": "Raw Data Collection",
+        "hint": "When enabled, captures all raw PF2e hook data (chat messages, items, tokens) during combat for external analysis. Warning: produces large data files."
       }
     },
     "journal": {

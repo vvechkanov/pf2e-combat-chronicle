@@ -2,6 +2,7 @@ import { HealthTracker } from './health-tracker.js';
 import { EffectTracker } from './effect-tracker.js';
 import { MovementTracker } from './movement-tracker.js';
 import { MessageParser } from './message-parser.js';
+import { RawCollector } from './raw-collector.js';
 import { generateSummary } from './summary-generator.js';
 
 const MODULE_ID = 'pf2e-combat-chronicle';
@@ -15,6 +16,8 @@ export class CombatTracker {
   #movementTracker = new MovementTracker();
   #saveTimeout = null;
   #messageParser = new MessageParser();
+  #rawCollector = new RawCollector();
+  #pendingAttribution = new Map();
 
   get currentEncounter() {
     return this.#encounter;
@@ -27,6 +30,16 @@ export class CombatTracker {
     }
 
     this.#combatId = combat.id;
+
+    this.#rawCollector.collect('combatStart', {
+      combat_id: combat.id,
+      scene_name: combat.scene?.name ?? null,
+      combatants: combat.turns.map(c => ({
+        name: c.name,
+        actor_id: c.actor?.id ?? null,
+        initiative: c.initiative,
+      })),
+    });
 
     const initiativeOrder = combat.turns.map(c => ({
       name: c.name,
@@ -124,8 +137,21 @@ export class CombatTracker {
     const isCombatant = combat.turns.some(c => c.actor?.id === speakerActorId);
     if (!isCombatant) return;
 
+    // Raw data collection (before any parsing)
+    this.#rawCollector.collect('createChatMessage', RawCollector.serializeChatMessage(message));
+
     const result = this.#messageParser.parse(message);
-    if (!result) return;
+    if (!result) {
+      if (message.flags?.pf2e) {
+        console.warn(`${MODULE_ID} | PF2e message could not be parsed`, {
+          messageId: message.id,
+          contextType: message.flags.pf2e.context?.type ?? null,
+          originType: message.flags.pf2e.origin?.type ?? null,
+          speaker: message.speaker?.alias ?? null,
+        });
+      }
+      return;
+    }
 
     // Resolve target actor_ids to names
     this.#resolveTargetNames(result, combat);
@@ -141,6 +167,17 @@ export class CombatTracker {
     });
 
     if (result._type === 'damage-enrichment') {
+      // Store attribution for subsequent HP changes
+      if (result.targets) {
+        for (const target of result.targets) {
+          if (target.actor_id) {
+            this.#pendingAttribution.set(target.actor_id, {
+              source: result.strike_name ?? null,
+              damage_type: result.damage_type ?? null,
+            });
+          }
+        }
+      }
       this.#enrichLastAction(currentTurn, result);
     } else {
       // Tag reactions (speaker is not the active combatant)
@@ -161,6 +198,7 @@ export class CombatTracker {
    */
   onItemCreated(item, options, userId) {
     if (!this.#encounter) return;
+    this.#rawCollector.collect('createItem', RawCollector.serializeItem(item));
     this.#effectTracker.onEffectCreated(item, options, userId);
   }
 
@@ -172,6 +210,7 @@ export class CombatTracker {
    */
   onItemDeleted(item, options, userId) {
     if (!this.#encounter) return;
+    this.#rawCollector.collect('deleteItem', RawCollector.serializeItem(item));
     this.#effectTracker.onEffectDeleted(item, options, userId);
   }
 
@@ -194,6 +233,7 @@ export class CombatTracker {
    */
   onItemUpdated(item, changes, options, userId) {
     if (!this.#encounter) return;
+    this.#rawCollector.collect('updateItem', RawCollector.serializeItem(item));
     this.#effectTracker.onEffectUpdated(item, changes, options, userId);
   }
 
@@ -204,6 +244,7 @@ export class CombatTracker {
    */
   onTokenMove(token, changes) {
     if (!this.#encounter) return;
+    this.#rawCollector.collect('updateToken', RawCollector.serializeTokenUpdate(token, changes));
     this.#movementTracker.onTokenMove(token, changes);
   }
 
@@ -226,6 +267,12 @@ export class CombatTracker {
 
     this.#encounter.ended_at = new Date().toISOString();
 
+    // Attach raw data if collection was enabled
+    if (this.#rawCollector.isEnabled()) {
+      this.#encounter.raw_data = this.#rawCollector.drain();
+      console.log(`${MODULE_ID} | Raw data collected: ${this.#encounter.raw_data.length} entries`);
+    }
+
     // Generate summary statistics
     this.#encounter.summary = generateSummary(this.#encounter);
 
@@ -239,6 +286,8 @@ export class CombatTracker {
     this.#effectTracker.reset();
     this.#movementTracker.reset();
     this.#messageParser.reset();
+    this.#rawCollector.reset();
+    this.#pendingAttribution.clear();
     this.#encounter = null;
     this.#combatId = null;
   }
@@ -251,16 +300,34 @@ export class CombatTracker {
     const encounterState = combat.getFlag(MODULE_ID, 'encounterState');
     if (!encounterState) return;
 
-    this.#combatId = combat.id;
-    this.#encounter = encounterState;
+    // Validate required fields
+    if (!encounterState.encounter_id || !Array.isArray(encounterState.rounds) || !Array.isArray(encounterState.initiative_order)) {
+      console.error(`${MODULE_ID} | Corrupted encounter state in combat flags, skipping restore`);
+      return;
+    }
 
-    const healthState = combat.getFlag(MODULE_ID, 'healthState');
-    this.#healthTracker.restoreState(healthState);
+    try {
+      this.#combatId = combat.id;
+      this.#encounter = encounterState;
 
-    const effectState = combat.getFlag(MODULE_ID, 'effectState');
-    this.#effectTracker.restoreState(effectState);
+      const healthState = combat.getFlag(MODULE_ID, 'healthState');
+      this.#healthTracker.restoreState(healthState);
 
-    console.log(`${MODULE_ID} | Restored combat state: ${this.#encounter.encounter_id}`);
+      const effectState = combat.getFlag(MODULE_ID, 'effectState');
+      this.#effectTracker.restoreState(effectState);
+
+      const rawState = combat.getFlag(MODULE_ID, 'rawCollectorState');
+      this.#rawCollector.restoreState(rawState);
+
+      console.log(`${MODULE_ID} | Restored combat state: ${this.#encounter.encounter_id}`);
+    } catch (err) {
+      console.error(`${MODULE_ID} | Failed to restore combat state from flags`, err);
+      this.#encounter = null;
+      this.#combatId = null;
+      this.#healthTracker.reset();
+      this.#effectTracker.reset();
+      this.#rawCollector.reset();
+    }
   }
 
   // ── Persistence ──────────────────────────────────────────────
@@ -291,6 +358,7 @@ export class CombatTracker {
           encounterState: this.#encounter,
           healthState: this.#healthTracker.serialize(),
           effectState: this.#effectTracker.serialize(),
+          rawCollectorState: this.#rawCollector.serialize(),
         },
       });
     } catch (err) {
@@ -390,6 +458,16 @@ export class CombatTracker {
 
     // Attach accumulated HP change events to this turn
     turn.hp_changes = this.#healthTracker.drainChanges();
+
+    // Apply pending source attribution to HP changes
+    for (const change of turn.hp_changes) {
+      const attribution = this.#pendingAttribution.get(change.actor_id);
+      if (attribution) {
+        change.source = attribution.source;
+        change.damage_type = attribution.damage_type;
+        this.#pendingAttribution.delete(change.actor_id);
+      }
+    }
   }
 
   /**

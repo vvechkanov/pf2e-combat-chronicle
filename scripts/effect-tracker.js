@@ -1,5 +1,7 @@
 const MODULE_ID = 'pf2e-combat-chronicle';
 
+const TRACKED_ITEM_TYPES = new Set(['condition', 'effect', 'buff']);
+
 export class EffectTracker {
   /** @type {Map<string, Array>} */
   #baselines = new Map();
@@ -18,7 +20,7 @@ export class EffectTracker {
   snapshotEffects(actor) {
     if (!actor?.items) return [];
     return actor.items
-      .filter(i => i.type === 'condition' || i.type === 'effect')
+      .filter(i => TRACKED_ITEM_TYPES.has(i.type))
       .map(i => ({
         name: i.name,
         type: i.type,
@@ -101,7 +103,7 @@ export class EffectTracker {
    * @param {string} userId
    */
   onEffectCreated(item, options, userId) {
-    if (item.type !== 'condition' && item.type !== 'effect') return null;
+    if (!TRACKED_ITEM_TYPES.has(item.type)) return null;
     const event = {
       event_type: 'applied',
       effect_name: item.name,
@@ -128,7 +130,7 @@ export class EffectTracker {
    * @param {string} userId
    */
   onEffectDeleted(item, options, userId) {
-    if (item.type !== 'condition' && item.type !== 'effect') return null;
+    if (!TRACKED_ITEM_TYPES.has(item.type)) return null;
     const event = {
       event_type: 'removed',
       effect_name: item.name,
@@ -155,7 +157,7 @@ export class EffectTracker {
    * @param {object} changes — the change delta
    */
   capturePreUpdateValue(item, changes) {
-    if (item.type !== 'condition' && item.type !== 'effect') return;
+    if (!TRACKED_ITEM_TYPES.has(item.type)) return;
     if (!foundry.utils.hasProperty(changes, 'system.value.value') &&
         !foundry.utils.hasProperty(changes, 'system.duration')) return;
     this.#preUpdateValues.set(item.id, item.system?.value?.value ?? null);
@@ -170,7 +172,7 @@ export class EffectTracker {
    * @param {string} userId
    */
   onEffectUpdated(item, changes, options, userId) {
-    if (item.type !== 'condition' && item.type !== 'effect') return null;
+    if (!TRACKED_ITEM_TYPES.has(item.type)) return null;
 
     const valueChanged = foundry.utils.hasProperty(changes, 'system.value.value');
     const durationChanged = foundry.utils.hasProperty(changes, 'system.duration');

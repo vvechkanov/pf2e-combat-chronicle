@@ -130,6 +130,8 @@ function computeGlobalStats(encounter, actorInfo, allTurns) {
     total_xp: xpResult.total_xp,
     xp_per_player: xpResult.xp_per_player,
     party_level: xpResult.party_level,
+    adjusted_xp: xpResult.adjusted_xp,
+    difficulty: xpResult.difficulty,
     avg_turn_duration_gm_seconds: turnDurations.avg_gm,
     avg_turn_duration_per_npc_type: turnDurations.per_npc_type,
     avg_turn_duration_per_player: turnDurations.per_player,
@@ -149,7 +151,7 @@ function computeXP(actorInfo) {
     if (info.type === 'npc' && info.level !== null) npcs.push(info.level);
   }
 
-  if (pcs.length === 0) return { total_xp: 0, xp_per_player: 0, party_level: null };
+  if (pcs.length === 0) return { total_xp: 0, xp_per_player: 0, party_level: null, adjusted_xp: 0, difficulty: null };
 
   const partyLevel = Math.round(pcs.reduce((s, l) => s + l, 0) / pcs.length);
   let totalXp = 0;
@@ -159,11 +161,25 @@ function computeXP(actorInfo) {
     totalXp += XP_TABLE[String(diff)] ?? 0;
   }
 
+  // Adjust XP budget for party size (PF2e CRB: calibrated for 4 PCs, ±20 per creature per PC)
+  const partySizeAdjustment = (pcs.length - 4) * npcs.length * 20;
+  const adjustedXp = totalXp + partySizeAdjustment;
+
   return {
     total_xp: totalXp,
     xp_per_player: pcs.length > 0 ? Math.floor(totalXp / pcs.length) : 0,
     party_level: partyLevel,
+    adjusted_xp: adjustedXp,
+    difficulty: classifyDifficulty(adjustedXp),
   };
+}
+
+function classifyDifficulty(adjustedXp) {
+  if (adjustedXp >= 200) return 'extreme';
+  if (adjustedXp >= 160) return 'severe';
+  if (adjustedXp >= 120) return 'moderate';
+  if (adjustedXp >= 80) return 'low';
+  return 'trivial';
 }
 
 function computeTurnDurations(allTurns, actorInfo) {
