@@ -7,7 +7,8 @@
       "pageName": "Encounter JSON",
       "saveSuccess": "Encounter saved to journal: {name}",
       "saveError": "Failed to save encounter to journal",
-      "noData": "No encounter data to save"
+      "noData": "No encounter data to save",
+      "readablePageName": "Combat Log"
     }
   }
 }

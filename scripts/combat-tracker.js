@@ -285,6 +285,7 @@ export class CombatTracker {
 
     const round = {
       round_number: roundNum,
+      started_at: new Date().toISOString(),
       turns: [],
     };
     this.#encounter.rounds.push(round);
@@ -313,6 +314,7 @@ export class CombatTracker {
       combatant_name: combatant.name,
       actor_id: actor?.id ?? null,
       turn_number: round.turns.length + 1,
+      started_at: new Date().toISOString(),
       hp_start: hpSnap?.hp ?? null,
       hp_max: hpSnap?.hp_max ?? null,
       temp_hp_start: hpSnap?.temp_hp ?? null,
@@ -328,6 +330,7 @@ export class CombatTracker {
       position_start: tokenPos,
       position_end: null,
       movements: [],
+      speed: actor?.system?.attributes?.speed?.total ?? null,
       total_distance_ft: 0,
       actions: [],
       chat_messages: [],

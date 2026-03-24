@@ -1,3 +1,5 @@
+import { formatEncounterHTML } from './journal-formatter.js';
+
 const MODULE_ID = 'pf2e-combat-chronicle';
 
 export class JournalWriter {
@@ -71,6 +73,14 @@ export class JournalWriter {
         name: pageName,
         type: 'text',
         text: { content: `<pre>${escaped}</pre>` },
+      }]);
+
+      const readablePageName = game.i18n.localize(`${MODULE_ID}.journal.readablePageName`);
+      const readableContent = formatEncounterHTML(encounterData);
+      await entry.createEmbeddedDocuments('JournalEntryPage', [{
+        name: readablePageName,
+        type: 'text',
+        text: { content: readableContent },
       }]);
 
       const successMsg = game.i18n.format(`${MODULE_ID}.journal.saveSuccess`, { name: entryName });
