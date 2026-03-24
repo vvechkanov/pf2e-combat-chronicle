@@ -33,4 +33,10 @@ Hooks.once('ready', () => {
   Hooks.on('deleteCombat', (combat, options, userId) => {
     tracker.endCombat(combat, options, userId);
   });
+
+  Hooks.on('updateActor', (actor, changes, options, userId) => {
+    if (foundry.utils.hasProperty(changes, 'system.attributes.hp')) {
+      tracker.onActorHPUpdate(actor, changes);
+    }
+  });
 });
