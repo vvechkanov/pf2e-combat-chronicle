@@ -161,7 +161,7 @@ function formatAction(action, hpChanges, actorNames) {
     const targetNames = action.targets.map(t => escapeHTML(t.name ?? t.actor_id ?? '?')).join(', ');
     let targetStr = `→ ${targetNames}`;
     // Show AC for attack rolls
-    if (action.dc && action.dc.slug === 'armor') {
+    if (action.dc && (action.dc.slug === 'armor' || action.dc.slug === 'ac')) {
       targetStr += ` (AC ${action.dc.value})`;
     }
     parts.push(targetStr);

@@ -35,6 +35,7 @@ export class CombatTracker {
       actor_level: c.actor?.system?.details?.level?.value ?? null,
       actor_type: c.actor?.hasPlayerOwner ? 'pc' : 'npc',
       initiative_total: c.initiative,
+      token_img: c.token?.texture?.src ?? c.actor?.prototypeToken?.texture?.src ?? null,
     }));
 
     this.#encounter = {
@@ -81,8 +82,12 @@ export class CombatTracker {
     this.#finalizeCurrentTurnEffects(combat, prior.round);
     this.#finalizeCurrentTurnMovement(combat, prior.round);
 
-    this.#ensureRound(combat);
-    this.#ensureTurn(combat);
+    // Update initiative_order if a new combatant has joined mid-combat
+    this.#syncInitiativeOrder(combat);
+
+    // Use current.round from hook params (combat.round may not be updated yet)
+    this.#ensureRound(combat, current.round);
+    this.#ensureTurn(combat, current.round);
     this.#scheduleSave();
   }
 
@@ -295,8 +300,8 @@ export class CombatTracker {
 
   // ── Round / Turn helpers ─────────────────────────────────────
 
-  #ensureRound(combat) {
-    const roundNum = combat.round;
+  #ensureRound(combat, explicitRound) {
+    const roundNum = explicitRound ?? combat.round;
     const existing = this.#encounter.rounds.find(r => r.round_number === roundNum);
     if (existing) return existing;
 
@@ -309,11 +314,12 @@ export class CombatTracker {
     return round;
   }
 
-  #ensureTurn(combat) {
+  #ensureTurn(combat, explicitRound) {
     const combatant = combat.combatant;
     if (!combatant) return;
 
-    const round = this.#encounter.rounds.find(r => r.round_number === combat.round);
+    const roundNum = explicitRound ?? combat.round;
+    const round = this.#encounter.rounds.find(r => r.round_number === roundNum);
     if (!round) return;
 
     const actor = combatant.actor;
@@ -482,12 +488,52 @@ export class CombatTracker {
     const targets = result.targets;
     if (!targets) return;
     for (const target of targets) {
-      if (target.actor_id && !target.name) {
-        target.name = game.actors?.get(target.actor_id)?.name
-          ?? combat.combatants?.find(c => c.actor?.id === target.actor_id)?.name
-          ?? null;
+      if (target.actor_id) {
+        const combatant = combat.combatants?.find(c => c.actor?.id === target.actor_id);
+        if (!target.name) {
+          target.name = game.actors?.get(target.actor_id)?.name
+            ?? combatant?.name
+            ?? null;
+        }
+        if (!target.token_img) {
+          target.token_img = combatant?.token?.texture?.src
+            ?? game.actors?.get(target.actor_id)?.prototypeToken?.texture?.src
+            ?? null;
+        }
       }
     }
+  }
+
+  /**
+   * Sync initiative_order with the current combat.turns, adding any new combatants.
+   */
+  #syncInitiativeOrder(combat) {
+    const knownIds = new Set(this.#encounter.initiative_order.map(e => e.actor_id));
+    for (const c of combat.turns) {
+      const actorId = c.actor?.id ?? null;
+      if (!actorId || knownIds.has(actorId)) continue;
+
+      this.#encounter.initiative_order.push({
+        name: c.name,
+        actor_id: actorId,
+        base_actor_id: c.actorId ?? actorId,
+        actor_level: c.actor?.system?.details?.level?.value ?? null,
+        actor_type: c.actor?.hasPlayerOwner ? 'pc' : 'npc',
+        initiative_total: c.initiative,
+        token_img: c.token?.texture?.src ?? c.actor?.prototypeToken?.texture?.src ?? null,
+      });
+      knownIds.add(actorId);
+
+      // Initialize baselines for new combatant
+      if (c.actor) this.#healthTracker.initBaseline(c.actor);
+      if (c.actor) this.#effectTracker.initBaseline(c.actor);
+      if (c.token) this.#movementTracker.initBaseline(c.token);
+
+      console.log(`${MODULE_ID} | Added late combatant to initiative: ${c.name}`);
+    }
+
+    // Re-sort by initiative_total descending
+    this.#encounter.initiative_order.sort((a, b) => (b.initiative_total ?? 0) - (a.initiative_total ?? 0));
   }
 
   #trimForwardData(targetRound, targetTurnIndex) {

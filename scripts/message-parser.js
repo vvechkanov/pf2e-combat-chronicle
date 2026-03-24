@@ -58,11 +58,15 @@ export class MessageParser {
     const targets = this.#extractTargets(pf2e);
     const roll = message.rolls?.[0] ?? null;
 
+    const rawTitle = context.title ?? null;
+    const cleanTitle = rawTitle ? this.#stripHTML(rawTitle).trim() : null;
+    const itemName = this.#extractItemName(pf2e, origin, cleanTitle);
+
     return {
       action_name: actionName,
       action_cost: DEFAULT_ACTION_COST[actionType] ?? 0,
       action_type: actionType,
-      item_name: origin.name ?? null,
+      item_name: itemName,
       item_type: origin.type ?? null,
       targets,
       roll_result: roll?.total ?? null,
@@ -73,10 +77,10 @@ export class MessageParser {
       healing_done: null,
       map_penalty: context.mapIncreases ?? null,
       notes: null,
-      // New fields
-      title: context.title ?? null,
+      title: cleanTitle,
       dc: context.dc ? { value: context.dc.value, slug: context.dc.slug ?? null } : null,
       save_type: contextType === 'saving-throw' ? (pf2e.modifierName ?? null) : null,
+      item_img: origin.img ?? origin.item?.img ?? null,
     };
   }
 
@@ -170,6 +174,26 @@ export class MessageParser {
     if (pf2e.casting?.name) return pf2e.casting.name;
     if (contextType) return contextType;
     return 'Unknown';
+  }
+
+  /**
+   * Extract item name from multiple sources.
+   */
+  #extractItemName(pf2e, origin, cleanTitle) {
+    if (origin.name) return origin.name;
+    if (pf2e.casting?.name) return pf2e.casting.name;
+    if (pf2e.strike?.name) return pf2e.strike.name;
+    // Extract from origin item data if available
+    if (origin.item?.name) return origin.item.name;
+    return null;
+  }
+
+  /**
+   * Strip HTML tags from a string, returning plain text.
+   */
+  #stripHTML(html) {
+    if (!html) return '';
+    return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
   }
 
   #extractTargets(pf2e) {
