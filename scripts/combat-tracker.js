@@ -1,5 +1,6 @@
 import { HealthTracker } from './health-tracker.js';
 import { EffectTracker } from './effect-tracker.js';
+import { MovementTracker } from './movement-tracker.js';
 import { MessageParser } from './message-parser.js';
 
 const MODULE_ID = 'pf2e-combat-chronicle';
@@ -10,6 +11,7 @@ export class CombatTracker {
   #combatId = null;
   #healthTracker = new HealthTracker();
   #effectTracker = new EffectTracker();
+  #movementTracker = new MovementTracker();
   #saveTimeout = null;
   #messageParser = new MessageParser();
 
@@ -41,10 +43,11 @@ export class CombatTracker {
       summary: {},
     };
 
-    // Initialize HP baselines for all combatants
+    // Initialize HP, effect, and movement baselines for all combatants
     for (const c of combat.turns) {
       if (c.actor) this.#healthTracker.initBaseline(c.actor);
       if (c.actor) this.#effectTracker.initBaseline(c.actor);
+      if (c.token) this.#movementTracker.initBaseline(c.token);
     }
 
     this.#ensureRound(combat);
@@ -66,9 +69,10 @@ export class CombatTracker {
       this.#trimForwardData(current.round, current.turn);
     }
 
-    // Finalize HP and effects for the previous turn
+    // Finalize HP, effects, and movement for the previous turn
     this.#finalizeCurrentTurnHP(combat, prior.round);
     this.#finalizeCurrentTurnEffects(combat, prior.round);
+    this.#finalizeCurrentTurnMovement(combat, prior.round);
 
     this.#ensureRound(combat);
     this.#ensureTurn(combat);
@@ -177,6 +181,16 @@ export class CombatTracker {
     this.#effectTracker.onEffectUpdated(item, changes, options, userId);
   }
 
+  /**
+   * Called from the updateToken hook when a token's position changes during combat.
+   * @param {TokenDocument} token
+   * @param {object} changes
+   */
+  onTokenMove(token, changes) {
+    if (!this.#encounter) return;
+    this.#movementTracker.onTokenMove(token, changes);
+  }
+
   endCombat(combat, options, userId) {
     if (!this.#encounter || combat.id !== this.#combatId) return;
 
@@ -186,9 +200,10 @@ export class CombatTracker {
       this.#saveTimeout = null;
     }
 
-    // Finalize HP and effects for the last active turn
+    // Finalize HP, effects, and movement for the last active turn
     this.#finalizeCurrentTurnHP(combat, combat.round);
     this.#finalizeCurrentTurnEffects(combat, combat.round);
+    this.#finalizeCurrentTurnMovement(combat, combat.round);
 
     this.#encounter.ended_at = new Date().toISOString();
 
@@ -200,6 +215,7 @@ export class CombatTracker {
 
     this.#healthTracker.reset();
     this.#effectTracker.reset();
+    this.#movementTracker.reset();
     this.#messageParser.reset();
     this.#encounter = null;
     this.#combatId = null;
@@ -286,9 +302,12 @@ export class CombatTracker {
     const hpSnap = actor ? this.#healthTracker.snapshotHP(actor) : null;
     const effectsSnap = actor ? this.#effectTracker.snapshotEffects(actor) : [];
 
-    // Initialize HP and effects baselines for this actor's turn
+    // Initialize HP, effects, and movement baselines for this actor's turn
     if (actor) this.#healthTracker.initBaseline(actor);
     if (actor) this.#effectTracker.initBaseline(actor);
+    if (combatant.token) this.#movementTracker.initBaseline(combatant.token);
+
+    const tokenPos = combatant.token ? { x: combatant.token.x, y: combatant.token.y } : null;
 
     const turn = {
       combatant_name: combatant.name,
@@ -306,6 +325,10 @@ export class CombatTracker {
       effects_gained: [],
       effects_lost: [],
       effects_changed: [],
+      position_start: tokenPos,
+      position_end: null,
+      movements: [],
+      total_distance_ft: 0,
       actions: [],
       chat_messages: [],
     };
@@ -359,6 +382,32 @@ export class CombatTracker {
       turn.effects_lost = diff.effects_lost;
       turn.effects_changed = diff.effects_changed;
     }
+  }
+
+  /**
+   * Finalize movement data for the current turn.
+   * @param {Combat} combat
+   * @param {number} roundNum — the round of the turn being finalized
+   */
+  #finalizeCurrentTurnMovement(combat, roundNum) {
+    const round = this.#encounter.rounds.find(r => r.round_number === roundNum);
+    if (!round || round.turns.length === 0) return;
+
+    const turn = round.turns[round.turns.length - 1];
+    if (turn.position_end !== null) return; // already finalized
+
+    // Find the combatant's token to get final position
+    const combatant = combat.turns?.find(c => c.actor?.id === turn.actor_id);
+    const token = combatant?.token;
+    if (token) {
+      turn.position_end = { x: token.x, y: token.y };
+    }
+
+    // Attach accumulated movement events
+    turn.movements = this.#movementTracker.drainMovements();
+    turn.total_distance_ft = turn.movements.reduce((sum, m) => sum + m.distance_ft, 0);
+    // Round total to 1 decimal
+    turn.total_distance_ft = Math.round(turn.total_distance_ft * 10) / 10;
   }
 
   #getCurrentTurn() {

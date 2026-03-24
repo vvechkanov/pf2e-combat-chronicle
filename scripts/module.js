@@ -60,6 +60,12 @@ Hooks.once('ready', () => {
     }
   });
 
+  Hooks.on('updateToken', (token, changes, options, userId) => {
+    if (('x' in changes) || ('y' in changes)) {
+      tracker.onTokenMove(token, changes);
+    }
+  });
+
   Hooks.on('createItem', (item, options, userId) => {
     tracker.onItemCreated(item, options, userId);
   });
