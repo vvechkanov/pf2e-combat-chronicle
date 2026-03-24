@@ -2,6 +2,7 @@ import { HealthTracker } from './health-tracker.js';
 import { EffectTracker } from './effect-tracker.js';
 import { MovementTracker } from './movement-tracker.js';
 import { MessageParser } from './message-parser.js';
+import { generateSummary } from './summary-generator.js';
 
 const MODULE_ID = 'pf2e-combat-chronicle';
 const SAVE_DEBOUNCE_MS = 1000;
@@ -30,6 +31,9 @@ export class CombatTracker {
     const initiativeOrder = combat.turns.map(c => ({
       name: c.name,
       actor_id: c.actor?.id ?? null,
+      base_actor_id: c.actorId ?? c.actor?.id ?? null,
+      actor_level: c.actor?.system?.details?.level?.value ?? null,
+      actor_type: c.actor?.hasPlayerOwner ? 'pc' : 'npc',
       initiative_total: c.initiative,
     }));
 
@@ -68,6 +72,9 @@ export class CombatTracker {
       console.warn(`${MODULE_ID} | Rewind detected: R${prior.round}T${prior.turn} → R${current.round}T${current.turn}`);
       this.#trimForwardData(current.round, current.turn);
     }
+
+    // Set ended_at timestamp on the previous turn
+    this.#setTurnEndedAt(prior.round);
 
     // Finalize HP, effects, and movement for the previous turn
     this.#finalizeCurrentTurnHP(combat, prior.round);
@@ -133,6 +140,7 @@ export class CombatTracker {
       if (activeCombatantActorId && speakerActorId !== activeCombatantActorId) {
         result.notes = 'reaction';
       }
+      result.actor_id = speakerActorId;
       currentTurn.actions.push(result);
     }
   }
@@ -200,12 +208,18 @@ export class CombatTracker {
       this.#saveTimeout = null;
     }
 
+    // Set ended_at timestamp on the last active turn
+    this.#setTurnEndedAt(combat.round);
+
     // Finalize HP, effects, and movement for the last active turn
     this.#finalizeCurrentTurnHP(combat, combat.round);
     this.#finalizeCurrentTurnEffects(combat, combat.round);
     this.#finalizeCurrentTurnMovement(combat, combat.round);
 
     this.#encounter.ended_at = new Date().toISOString();
+
+    // Generate summary statistics
+    this.#encounter.summary = generateSummary(this.#encounter);
 
     const totalRounds = this.#encounter.rounds.length;
     const totalTurns = this.#encounter.rounds.reduce((sum, r) => sum + r.turns.length, 0);
@@ -313,8 +327,10 @@ export class CombatTracker {
     const turn = {
       combatant_name: combatant.name,
       actor_id: actor?.id ?? null,
+      base_actor_id: combatant.actorId ?? actor?.id ?? null,
       turn_number: round.turns.length + 1,
       started_at: new Date().toISOString(),
+      ended_at: null,
       hp_start: hpSnap?.hp ?? null,
       hp_max: hpSnap?.hp_max ?? null,
       temp_hp_start: hpSnap?.temp_hp ?? null,
@@ -411,6 +427,15 @@ export class CombatTracker {
     turn.total_distance_ft = turn.movements.reduce((sum, m) => sum + m.distance_ft, 0);
     // Round total to 1 decimal
     turn.total_distance_ft = Math.round(turn.total_distance_ft * 10) / 10;
+  }
+
+  #setTurnEndedAt(roundNum) {
+    const round = this.#encounter.rounds.find(r => r.round_number === roundNum);
+    if (!round || round.turns.length === 0) return;
+    const turn = round.turns[round.turns.length - 1];
+    if (turn.ended_at === null) {
+      turn.ended_at = new Date().toISOString();
+    }
   }
 
   #getCurrentTurn() {
