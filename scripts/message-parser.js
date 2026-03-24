@@ -81,6 +81,7 @@ export class MessageParser {
       dc: context.dc ? { value: context.dc.value, slug: context.dc.slug ?? null } : null,
       save_type: contextType === 'saving-throw' ? (pf2e.modifierName ?? null) : null,
       item_img: origin.img ?? origin.item?.img ?? null,
+      item_description: this.#extractDescription(origin),
     };
   }
 
@@ -194,6 +195,16 @@ export class MessageParser {
   #stripHTML(html) {
     if (!html) return '';
     return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
+  }
+
+  /**
+   * Extract item description from origin data.
+   */
+  #extractDescription(origin) {
+    const desc = origin.item?.system?.description?.value ?? null;
+    if (!desc) return null;
+    // Strip HTML tags to store as plain text
+    return this.#stripHTML(desc).trim() || null;
   }
 
   #extractTargets(pf2e) {
