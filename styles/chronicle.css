@@ -1,1 +1,324 @@
-/* PF2e Combat Chronicle — minimal styles */
+/* PF2e Combat Chronicle — Journal Styles */
+
+/* ── Root container ─────────────────────────────────────────────────────────── */
+
+.combat-chronicle {
+  font-family: var(--journal-font-family, "Signika", sans-serif);
+  line-height: 1.5;
+  color: var(--color-text-dark-primary, #191813);
+}
+
+.combat-chronicle h2 {
+  margin-bottom: 0.25em;
+}
+
+.combat-chronicle .cc-meta {
+  margin-top: 0;
+  color: var(--color-text-dark-secondary, #4b4a44);
+}
+
+/* ── Initiative table ───────────────────────────────────────────────────────── */
+
+.combat-chronicle .cc-initiative table {
+  border-collapse: collapse;
+  margin: 0.5em 0 1em 0;
+  font-size: 0.9em;
+}
+
+.combat-chronicle .cc-initiative td {
+  padding: 2px 10px 2px 0;
+}
+
+.combat-chronicle .cc-initiative td:first-child {
+  color: var(--color-text-dark-secondary, #4b4a44);
+  text-align: right;
+  min-width: 2em;
+}
+
+.combat-chronicle .cc-initiative td:last-child {
+  font-weight: 600;
+  text-align: right;
+}
+
+/* ── Round (collapsible) ────────────────────────────────────────────────────── */
+
+.combat-chronicle .cc-round {
+  margin: 1em 0;
+  border: 1px solid var(--color-border-light-tertiary, #ccc);
+  border-radius: 4px;
+  background: var(--color-bg-option, #f9f8f5);
+}
+
+.combat-chronicle .cc-round > summary {
+  cursor: pointer;
+  padding: 8px 12px;
+  font-size: 1.05em;
+  font-weight: 700;
+  background: var(--color-bg-btn, #e8e6e0);
+  border-bottom: 1px solid var(--color-border-light-tertiary, #ccc);
+  border-radius: 4px 4px 0 0;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  user-select: none;
+}
+
+.combat-chronicle .cc-round > summary::-webkit-details-marker {
+  display: none;
+}
+
+.combat-chronicle .cc-round > summary::before {
+  content: "▶";
+  font-size: 0.7em;
+  transition: transform 0.15s ease;
+  display: inline-block;
+}
+
+.combat-chronicle .cc-round[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.combat-chronicle .cc-round > summary .cc-elapsed {
+  font-weight: 400;
+  font-size: 0.85em;
+  color: var(--color-text-dark-secondary, #4b4a44);
+}
+
+.combat-chronicle .cc-round-body {
+  padding: 4px 0;
+}
+
+/* ── Turn ───────────────────────────────────────────────────────────────────── */
+
+.combat-chronicle .cc-turn {
+  padding: 8px 12px;
+  border-bottom: 1px dashed var(--color-border-light-tertiary, #ddd);
+}
+
+.combat-chronicle .cc-turn:last-child {
+  border-bottom: none;
+}
+
+.combat-chronicle .cc-turn-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.combat-chronicle .cc-turn-header strong {
+  font-size: 1em;
+}
+
+.combat-chronicle .cc-hp {
+  font-size: 0.8em;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--color-bg-btn, #e8e6e0);
+  color: var(--color-text-dark-secondary, #4b4a44);
+  white-space: nowrap;
+}
+
+.combat-chronicle .cc-turn-header .cc-elapsed {
+  font-size: 0.8em;
+  color: var(--color-text-dark-secondary, #888);
+  margin-left: auto;
+}
+
+/* ── Action group ───────────────────────────────────────────────────────────── */
+
+.combat-chronicle .cc-action-group {
+  border-left: 3px solid var(--color-border-light-tertiary, #bbb);
+  margin: 6px 0 6px 4px;
+  padding: 4px 0 4px 10px;
+  background: rgba(0, 0, 0, 0.015);
+  border-radius: 0 3px 3px 0;
+}
+
+.combat-chronicle .cc-action-group--spell {
+  border-left-color: #7b5ea7;
+  background: rgba(123, 94, 167, 0.04);
+}
+
+.combat-chronicle .cc-action-group--strike {
+  border-left-color: #c17817;
+  background: rgba(193, 120, 23, 0.04);
+}
+
+.combat-chronicle .cc-action-group--skill {
+  border-left-color: #2a9d8f;
+  background: rgba(42, 157, 143, 0.04);
+}
+
+.combat-chronicle .cc-action-group--other {
+  border-left-color: #999;
+}
+
+/* ── Action line ────────────────────────────────────────────────────────────── */
+
+.combat-chronicle .cc-action {
+  padding: 2px 0;
+  font-size: 0.9em;
+  line-height: 1.4;
+}
+
+.combat-chronicle .cc-action-name {
+  font-weight: 600;
+}
+
+.combat-chronicle .cc-action-map {
+  font-size: 0.85em;
+  color: var(--color-text-dark-secondary, #888);
+}
+
+.combat-chronicle .cc-target {
+  font-style: italic;
+}
+
+.combat-chronicle .cc-roll {
+  font-weight: 600;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.95em;
+}
+
+.combat-chronicle .cc-separator {
+  color: var(--color-text-dark-secondary, #aaa);
+  margin: 0 1px;
+}
+
+/* ── Degree of success ──────────────────────────────────────────────────────── */
+
+.combat-chronicle .cc-degree {
+  font-weight: 600;
+  font-size: 0.85em;
+  padding: 0 4px;
+  border-radius: 2px;
+}
+
+.combat-chronicle .cc-degree--critical-success {
+  color: #0d7a3a;
+  background: rgba(13, 122, 58, 0.1);
+}
+
+.combat-chronicle .cc-degree--success {
+  color: #2a7d2e;
+}
+
+.combat-chronicle .cc-degree--failure {
+  color: #888;
+}
+
+.combat-chronicle .cc-degree--critical-failure {
+  color: #c22;
+  background: rgba(204, 34, 34, 0.08);
+}
+
+/* ── Damage / Healing ───────────────────────────────────────────────────────── */
+
+.combat-chronicle .cc-damage {
+  color: #a33;
+  font-weight: 600;
+}
+
+.combat-chronicle .cc-healing {
+  color: #2a7d2e;
+  font-weight: 600;
+}
+
+.combat-chronicle .cc-persistent {
+  font-size: 0.85em;
+  color: #a33;
+  font-style: italic;
+}
+
+/* ── Follow-up (damage-taken, etc.) ─────────────────────────────────────────── */
+
+.combat-chronicle .cc-follow-up {
+  padding: 2px 0 2px 12px;
+  font-size: 0.82em;
+  color: var(--color-text-dark-secondary, #777);
+  font-style: italic;
+}
+
+/* ── Turn footer (movement, HP delta, effects) ──────────────────────────────── */
+
+.combat-chronicle .cc-turn-footer {
+  margin-top: 6px;
+  padding-top: 4px;
+  font-size: 0.85em;
+  color: var(--color-text-dark-secondary, #666);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+
+.combat-chronicle .cc-turn-footer strong {
+  font-weight: 600;
+}
+
+.combat-chronicle .cc-hp-change {
+  white-space: nowrap;
+}
+
+.combat-chronicle .cc-hp-delta-negative {
+  color: #a33;
+}
+
+.combat-chronicle .cc-hp-delta-positive {
+  color: #2a7d2e;
+}
+
+.combat-chronicle .cc-effect-gained {
+  color: #2a7d2e;
+}
+
+.combat-chronicle .cc-effect-lost {
+  color: #a33;
+}
+
+.combat-chronicle .cc-effect-changed {
+  color: #c17817;
+}
+
+/* ── Active effects (turn start) ────────────────────────────────────────────── */
+
+.combat-chronicle .cc-active-effects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-bottom: 6px;
+}
+
+.combat-chronicle .cc-effect-tag {
+  font-size: 0.75em;
+  padding: 1px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.combat-chronicle .cc-effect-tag--condition {
+  background: rgba(193, 120, 23, 0.12);
+  color: #a06010;
+  border: 1px solid rgba(193, 120, 23, 0.25);
+}
+
+.combat-chronicle .cc-effect-tag--effect {
+  background: rgba(123, 94, 167, 0.1);
+  color: #6b4e97;
+  border: 1px solid rgba(123, 94, 167, 0.2);
+}
+
+/* ── Reaction badge ─────────────────────────────────────────────────────────── */
+
+.combat-chronicle .cc-reaction {
+  font-size: 0.8em;
+  font-weight: 600;
+  padding: 0 4px;
+  border-radius: 2px;
+  background: rgba(193, 120, 23, 0.12);
+  color: #c17817;
+  white-space: nowrap;
+}

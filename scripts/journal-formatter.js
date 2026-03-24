@@ -1,6 +1,12 @@
 /**
  * Formats encounter data into human-readable HTML for a JournalEntryPage.
  * Pure function — no Foundry API dependencies, operates only on the data object.
+ *
+ * Features:
+ * - Collapsible rounds via <details>
+ * - Action grouping: related actions (spell + attacks + damage) clustered visually
+ * - Attack series: consecutive strikes/spells grouped as one activity
+ * - Follow-up actions (damage-taken) shown only when they carry extra info
  */
 
 const DEGREE_LABELS = {
@@ -16,6 +22,8 @@ const SAVE_TYPE_LABELS = {
   will: 'Will',
 };
 
+// ── Public API ──────────────────────────────────────────────────────────────
+
 /**
  * Format encounter data as human-readable HTML.
  * @param {object} data — full encounter data object
@@ -25,10 +33,9 @@ export function formatEncounterHTML(data) {
   if (!data) return '';
   const parts = [];
   const combatStart = data.started_at ? new Date(data.started_at) : null;
-
-  // Build actor name lookup from initiative order
   const actorNames = buildActorNameMap(data.initiative_order);
 
+  parts.push(`<div class="combat-chronicle">`);
   parts.push(formatHeader(data, combatStart));
   parts.push(formatInitiativeTable(data.initiative_order));
 
@@ -36,6 +43,7 @@ export function formatEncounterHTML(data) {
     parts.push(formatRound(round, combatStart, actorNames));
   }
 
+  parts.push(`</div>`);
   return parts.join('\n');
 }
 
@@ -52,7 +60,7 @@ function buildActorNameMap(initiativeOrder) {
   return map;
 }
 
-// ── Header ───────────────────────────────────────────────────────────────────
+// ── Header ──────────────────────────────────────────────────────────────────
 
 function formatHeader(data, combatStart) {
   const scene = escapeHTML(data.scene_name ?? 'Unknown Scene');
@@ -61,13 +69,13 @@ function formatHeader(data, combatStart) {
   let durationStr = '';
   if (combatStart && data.ended_at) {
     const combatEnd = new Date(data.ended_at);
-    durationStr = ` (${formatElapsed(combatStart, combatEnd)}, ${rounds} round${rounds !== 1 ? 's' : ''})`;
+    durationStr = ` ${formatElapsed(combatStart, combatEnd)}, ${rounds} round${rounds !== 1 ? 's' : ''}`;
   }
 
-  return `<h2>${scene}</h2>\n<p><strong>Duration:</strong>${durationStr}</p>`;
+  return `<h2>${scene}</h2>\n<p class="cc-meta"><strong>Duration:</strong>${durationStr}</p>`;
 }
 
-// ── Initiative ───────────────────────────────────────────────────────────────
+// ── Initiative ──────────────────────────────────────────────────────────────
 
 function formatInitiativeTable(order) {
   if (!order || order.length === 0) return '';
@@ -78,111 +86,201 @@ function formatInitiativeTable(order) {
     return `  <tr><td>${i + 1}.</td><td>${name}</td><td>${init}</td></tr>`;
   });
 
-  return `<h3>Initiative</h3>\n<table>\n${rows.join('\n')}\n</table>`;
+  return `<div class="cc-initiative"><h3>Initiative</h3>\n<table>\n${rows.join('\n')}\n</table></div>`;
 }
 
-// ── Round ────────────────────────────────────────────────────────────────────
+// ── Round ───────────────────────────────────────────────────────────────────
 
 function formatRound(round, combatStart, actorNames) {
   const elapsed = formatElapsedTag(combatStart, round.started_at);
-  const parts = [`<h3>Round ${round.round_number}${elapsed}</h3>`];
+  const parts = [];
+
+  parts.push(`<details class="cc-round" open>`);
+  parts.push(`<summary>Round ${round.round_number} ${elapsed}</summary>`);
+  parts.push(`<div class="cc-round-body">`);
 
   for (const turn of round.turns ?? []) {
     parts.push(formatTurn(turn, combatStart, actorNames));
   }
 
+  parts.push(`</div>`);
+  parts.push(`</details>`);
+
   return parts.join('\n');
 }
 
-// ── Turn ─────────────────────────────────────────────────────────────────────
+// ── Turn ────────────────────────────────────────────────────────────────────
 
 function formatTurn(turn, combatStart, actorNames) {
   const name = escapeHTML(turn.combatant_name ?? 'Unknown');
   const hpLabel = turn.hp_start !== null && turn.hp_max !== null
-    ? ` (HP: ${turn.hp_start}/${turn.hp_max})`
+    ? `HP ${turn.hp_start}/${turn.hp_max}`
     : '';
   const elapsed = formatElapsedTag(combatStart, turn.started_at);
 
-  const parts = [`<h4>${name}${hpLabel}${elapsed}</h4>`];
+  const parts = [];
+  parts.push(`<div class="cc-turn">`);
 
-  // Actions (skip move-type actions — we show aggregated movement separately)
-  const displayActions = (turn.actions ?? []).filter(a => a.action_type !== 'move');
-  if (displayActions.length > 0) {
-    const items = displayActions.map(a => `  <li>${formatAction(a, turn.hp_changes, actorNames)}</li>`);
-    parts.push(`<ul>\n${items.join('\n')}\n</ul>`);
+  // Turn header
+  parts.push(`<div class="cc-turn-header">`);
+  parts.push(`  <strong>${name}</strong>`);
+  if (hpLabel) parts.push(`  <span class="cc-hp">${hpLabel}</span>`);
+  if (elapsed) parts.push(`  <span class="cc-elapsed">${elapsed}</span>`);
+  parts.push(`</div>`);
+
+  // Active effects at turn start
+  const activeEffects = formatActiveEffects(turn.effects_start);
+  if (activeEffects) parts.push(activeEffects);
+
+  // Group actions and render
+  const groups = groupTurnActions(turn.actions ?? []);
+  for (const group of groups) {
+    parts.push(formatActionGroup(group, turn.hp_changes, actorNames));
   }
 
-  // Movement
-  if (turn.total_distance_ft > 0) {
-    const speedPart = turn.speed ? `/${turn.speed}ft` : 'ft';
-    parts.push(`<p><strong>Move:</strong> ${turn.total_distance_ft}ft${speedPart}</p>`);
-  }
+  // Effect changes as follow-up blocks (gained/lost/changed during this turn)
+  const effectChanges = formatEffectChanges(turn);
+  if (effectChanges) parts.push(effectChanges);
 
-  // HP change summary
-  if (turn.hp_start !== null && turn.hp_end !== null && turn.hp_start !== turn.hp_end) {
-    const delta = turn.hp_end - turn.hp_start;
-    const sign = delta > 0 ? '+' : '';
-    parts.push(`<p><strong>HP:</strong> ${turn.hp_start} → ${turn.hp_end} (${sign}${delta})</p>`);
-  }
+  // Turn footer: movement, HP delta
+  const footer = formatTurnFooter(turn);
+  if (footer) parts.push(footer);
 
-  // Effects diff
-  const effectLines = formatEffectsDiff(turn);
-  if (effectLines) {
-    parts.push(`<p><strong>Effects:</strong> ${effectLines}</p>`);
-  }
-
+  parts.push(`</div>`);
   return parts.join('\n');
 }
 
-// ── Action formatting ────────────────────────────────────────────────────────
+// ── Action grouping ─────────────────────────────────────────────────────────
 
-function formatAction(action, hpChanges, actorNames) {
+/**
+ * Group turn actions into logical clusters.
+ * Returns an array of { primary: Action[], followUps: Action[], type: string }.
+ */
+function groupTurnActions(actions) {
+  const groups = [];
+  let current = null;
+
+  for (const action of actions) {
+    // Skip move-type actions — shown in turn footer
+    if (action.action_type === 'move') continue;
+
+    if (isFollowUpAction(action)) {
+      if (current) {
+        current.followUps.push(action);
+      }
+      // If no current group, discard orphaned follow-ups
+      continue;
+    }
+
+    // Check if this continues the current group (attack series, spell multi-attack)
+    if (current && isSameActivityGroup(current, action)) {
+      current.primary.push(action);
+      continue;
+    }
+
+    // Start a new group
+    current = { primary: [action], followUps: [], type: action.action_type };
+    groups.push(current);
+  }
+
+  return groups;
+}
+
+/**
+ * Actions that attach to the preceding group rather than starting a new one.
+ */
+function isFollowUpAction(action) {
+  if (action.action_name === 'damage-taken') return true;
+  if (action.action_name === 'Unknown') return true;
+  if (action.notes === 'standalone damage roll') return true;
+  return false;
+}
+
+/**
+ * Whether an action continues the current group (attack series / multi-spell).
+ */
+function isSameActivityGroup(group, action) {
+  if (group.primary.length === 0) return false;
+  const first = group.primary[0];
+
+  // Consecutive spell actions (spell-cast → spell attacks)
+  if (first.action_type === 'spell' && action.action_type === 'spell') return true;
+
+  // Consecutive strike actions (flurry, multi-attack)
+  if (first.action_type === 'strike' && action.action_type === 'strike') return true;
+
+  return false;
+}
+
+// ── Action group rendering ──────────────────────────────────────────────────
+
+function formatActionGroup(group, hpChanges, actorNames) {
+  const typeClass = `cc-action-group--${group.type || 'other'}`;
   const parts = [];
 
-  // Use title if available, otherwise build from action_name + item_name
+  parts.push(`<div class="cc-action-group ${typeClass}">`);
+
+  // Primary actions
+  for (const action of group.primary) {
+    parts.push(formatAction(action, hpChanges, actorNames));
+  }
+
+  // Follow-up actions (damage-taken) — only if they have useful extra info
+  for (const followUp of group.followUps) {
+    const followUpHTML = formatFollowUp(followUp, actorNames);
+    if (followUpHTML) parts.push(followUpHTML);
+  }
+
+  parts.push(`</div>`);
+  return parts.join('\n');
+}
+
+// ── Action formatting ───────────────────────────────────────────────────────
+
+function formatAction(action, hpChanges, actorNames) {
+  const fragments = [];
+
+  // Action name / title
   let label;
   if (action.title) {
     label = escapeHTML(action.title);
-    if (action.map_penalty) label += ` (MAP -${action.map_penalty * 5})`;
   } else {
     label = escapeHTML(action.action_name ?? 'Unknown');
     if (action.item_name && action.item_name !== action.action_name) {
-      label += ` (${escapeHTML(action.item_name)}`;
-      if (action.map_penalty) label += `, MAP -${action.map_penalty * 5}`;
-      label += ')';
-    } else if (action.map_penalty) {
-      label += ` (MAP -${action.map_penalty * 5})`;
+      label += ` (${escapeHTML(action.item_name)})`;
     }
   }
-  parts.push(label);
+  fragments.push(`<span class="cc-action-name">${label}</span>`);
 
-  // Targets with AC/DC
+  // MAP penalty
+  if (action.map_penalty) {
+    fragments.push(`<span class="cc-action-map">MAP -${action.map_penalty * 5}</span>`);
+  }
+
+  // Targets
   if (action.targets?.length) {
     const targetNames = action.targets.map(t => escapeHTML(t.name ?? t.actor_id ?? '?')).join(', ');
-    let targetStr = `→ ${targetNames}`;
-    // Show AC for attack rolls
+    let targetStr = `<span class="cc-target">${targetNames}</span>`;
     if (action.dc && (action.dc.slug === 'armor' || action.dc.slug === 'ac')) {
       targetStr += ` (AC ${action.dc.value})`;
     }
-    parts.push(targetStr);
+    fragments.push(`→ ${targetStr}`);
   }
 
-  // Roll result with DC for saving throws
+  // Roll result
   if (action.roll_result !== null && action.roll_result !== undefined) {
+    let rollStr = `<span class="cc-roll">${action.roll_result}</span>`;
     if (action.save_type) {
-      // Saving throw: show roll vs DC
       const dcStr = action.dc ? ` vs DC ${action.dc.value}` : '';
-      parts.push(`${action.roll_result}${dcStr}`);
-    } else if (action.action_type === 'strike' || action.action_type === 'spell') {
-      parts.push(`${action.roll_result}`);
-    } else {
-      parts.push(`${action.roll_result}`);
+      rollStr += dcStr;
     }
+    fragments.push(rollStr);
   }
 
   // Degree of success
   if (action.degree_of_success) {
-    parts.push(DEGREE_LABELS[action.degree_of_success] ?? action.degree_of_success);
+    const degreeLabel = DEGREE_LABELS[action.degree_of_success] ?? action.degree_of_success;
+    fragments.push(`<span class="cc-degree cc-degree--${action.degree_of_success}">${degreeLabel}</span>`);
   }
 
   // Damage
@@ -190,7 +288,6 @@ function formatAction(action, hpChanges, actorNames) {
     const dmgType = action.damage_type ? ` ${escapeHTML(action.damage_type)}` : '';
     let dmgStr = `${action.damage_dealt}${dmgType}`;
 
-    // Cross-reference with actual HP changes
     const actualDelta = findActualHPDelta(action, hpChanges);
     if (actualDelta !== null && Math.abs(actualDelta) !== action.damage_dealt) {
       const actual = Math.abs(actualDelta);
@@ -202,12 +299,12 @@ function formatAction(action, hpChanges, actorNames) {
       }
     }
 
-    parts.push(dmgStr);
+    fragments.push(`<span class="cc-damage">${dmgStr}</span>`);
   }
 
   // Healing
   if (action.healing_done !== null && action.healing_done !== undefined) {
-    parts.push(`healed ${action.healing_done} HP`);
+    fragments.push(`<span class="cc-healing">healed ${action.healing_done} HP</span>`);
   }
 
   // Persistent damage
@@ -218,31 +315,73 @@ function formatAction(action, hpChanges, actorNames) {
       return `${formula} ${type}`.trim();
     }).filter(Boolean);
     if (persistentParts.length) {
+      fragments.push(`<span class="cc-persistent">persistent: ${persistentParts.join(', ')}</span>`);
+    }
+  }
+
+  // Reaction tag
+  if (action.notes === 'reaction') {
+    const reactorName = action.actor_id
+      ? escapeHTML(actorNames.get(action.actor_id) ?? action.actor_id)
+      : 'Reaction';
+    fragments.push(`<span class="cc-reaction">${reactorName}</span>`);
+  }
+
+  const sep = ` <span class="cc-separator">—</span> `;
+  return `<div class="cc-action">${fragments.join(sep)}</div>`;
+}
+
+// ── Follow-up (damage-taken) ────────────────────────────────────────────────
+
+/**
+ * Format a damage-taken follow-up. Returns HTML string or null if nothing useful to show.
+ * Only renders when applied_damage contains extras: shield, persistent, or is_healing.
+ */
+function formatFollowUp(action, actorNames) {
+  if (action.action_name !== 'damage-taken') return null;
+
+  const applied = action.applied_damage;
+  if (!applied) return null;
+
+  const parts = [];
+
+  // Shield block info
+  if (applied.shield && applied.shield > 0) {
+    parts.push(`shield blocked ${applied.shield}`);
+  }
+
+  // Persistent damage
+  if (applied.persistent?.length) {
+    const persistentParts = applied.persistent.map(p => {
+      const type = p.damageType ? escapeHTML(p.damageType) : '';
+      const formula = p.formula ? escapeHTML(p.formula) : '';
+      return `${formula} ${type}`.trim();
+    }).filter(Boolean);
+    if (persistentParts.length) {
       parts.push(`persistent: ${persistentParts.join(', ')}`);
     }
   }
 
-  // Reaction tag — show actor name instead of generic [Reaction]
-  if (action.notes === 'reaction' && action.actor_id) {
-    const reactorName = actorNames.get(action.actor_id) ?? action.actor_id;
-    parts.push(`[${escapeHTML(reactorName)}]`);
-  } else if (action.notes === 'reaction') {
-    parts.push('[Reaction]');
+  // Is healing (unusual for damage-taken, but worth noting)
+  if (applied.is_healing) {
+    parts.push('healing applied');
   }
 
-  return parts.join(' — ');
+  // Nothing extra to show
+  if (parts.length === 0) return null;
+
+  return `<div class="cc-follow-up">${parts.join(' · ')}</div>`;
 }
 
+// ── HP delta matching ───────────────────────────────────────────────────────
+
 /**
- * Try to find the actual HP delta for a damage action by matching targets
- * against hp_changes on the same turn.
- * @returns {number|null} the HP delta (negative for damage), or null if not found
+ * Find actual HP delta for a damage action by matching targets against hp_changes.
  */
 function findActualHPDelta(action, hpChanges) {
   if (!hpChanges?.length || !action.targets?.length) return null;
   if (action.damage_dealt === null && action.healing_done === null) return null;
 
-  // Find an HP change whose actor_name matches one of the action's targets
   for (const target of action.targets) {
     const targetName = target.name ?? null;
     if (!targetName) continue;
@@ -253,31 +392,80 @@ function findActualHPDelta(action, hpChanges) {
   return null;
 }
 
-// ── Effects diff ─────────────────────────────────────────────────────────────
-
-function formatEffectsDiff(turn) {
-  const parts = [];
-
-  for (const name of turn.effects_gained ?? []) {
-    parts.push(`+${escapeHTML(name)}`);
-  }
-
-  for (const name of turn.effects_lost ?? []) {
-    parts.push(`-${escapeHTML(name)}`);
-  }
-
-  for (const change of turn.effects_changed ?? []) {
-    parts.push(`${escapeHTML(change.name)} ${change.from}→${change.to}`);
-  }
-
-  return parts.length > 0 ? parts.join(', ') : null;
-}
-
-// ── Time helpers ─────────────────────────────────────────────────────────────
+// ── Active effects at turn start ────────────────────────────────────────────
 
 /**
- * Format elapsed time between two Date objects as M:SS or H:MM:SS.
+ * Render active conditions/effects as tags below the turn header.
  */
+function formatActiveEffects(effectsStart) {
+  if (!effectsStart || effectsStart.length === 0) return null;
+
+  const tags = effectsStart.map(eff => {
+    let label = escapeHTML(eff.name);
+    if (eff.value !== null && eff.value !== undefined) {
+      label += ` ${eff.value}`;
+    }
+    const typeClass = eff.type === 'condition' ? 'cc-effect-tag--condition' : 'cc-effect-tag--effect';
+    return `<span class="cc-effect-tag ${typeClass}">${label}</span>`;
+  });
+
+  return `<div class="cc-active-effects">${tags.join(' ')}</div>`;
+}
+
+// ── Effect changes (follow-up style) ────────────────────────────────────────
+
+/**
+ * Render gained/lost/changed effects as follow-up blocks (same style as damage-taken).
+ */
+function formatEffectChanges(turn) {
+  const gained = turn.effects_gained ?? [];
+  const lost = turn.effects_lost ?? [];
+  const changed = turn.effects_changed ?? [];
+
+  if (gained.length === 0 && lost.length === 0 && changed.length === 0) return null;
+
+  const parts = [];
+
+  for (const name of gained) {
+    parts.push(`<div class="cc-follow-up"><span class="cc-effect-gained">+${escapeHTML(name)}</span></div>`);
+  }
+
+  for (const name of lost) {
+    parts.push(`<div class="cc-follow-up"><span class="cc-effect-lost">-${escapeHTML(name)}</span></div>`);
+  }
+
+  for (const change of changed) {
+    parts.push(`<div class="cc-follow-up"><span class="cc-effect-changed">${escapeHTML(change.name)} ${change.from}→${change.to}</span></div>`);
+  }
+
+  return `<div class="cc-action-group cc-action-group--other">${parts.join('\n')}</div>`;
+}
+
+// ── Turn footer ─────────────────────────────────────────────────────────────
+
+function formatTurnFooter(turn) {
+  const parts = [];
+
+  // Movement
+  if (turn.total_distance_ft > 0) {
+    const speedPart = turn.speed ? `/${turn.speed}ft` : 'ft';
+    parts.push(`<span><strong>Move:</strong> ${turn.total_distance_ft}ft${speedPart}</span>`);
+  }
+
+  // HP change
+  if (turn.hp_start !== null && turn.hp_end !== null && turn.hp_start !== turn.hp_end) {
+    const delta = turn.hp_end - turn.hp_start;
+    const sign = delta > 0 ? '+' : '';
+    const deltaClass = delta < 0 ? 'cc-hp-delta-negative' : 'cc-hp-delta-positive';
+    parts.push(`<span class="cc-hp-change"><strong>HP:</strong> ${turn.hp_start} → ${turn.hp_end} (<span class="${deltaClass}">${sign}${delta}</span>)</span>`);
+  }
+
+  if (parts.length === 0) return null;
+  return `<div class="cc-turn-footer">${parts.join('')}</div>`;
+}
+
+// ── Time helpers ────────────────────────────────────────────────────────────
+
 function formatElapsed(start, end) {
   const diffMs = end - start;
   if (diffMs < 0) return '0:00';
@@ -293,17 +481,13 @@ function formatElapsed(start, end) {
   return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
-/**
- * Format an elapsed-time tag like " [+1:23]" from combatStart and an ISO timestamp.
- * Returns empty string if either value is missing.
- */
 function formatElapsedTag(combatStart, isoTimestamp) {
   if (!combatStart || !isoTimestamp) return '';
   const ts = new Date(isoTimestamp);
-  return ` <em>[+${formatElapsed(combatStart, ts)}]</em>`;
+  return `<span class="cc-elapsed">[+${formatElapsed(combatStart, ts)}]</span>`;
 }
 
-// ── Utilities ────────────────────────────────────────────────────────────────
+// ── Utilities ───────────────────────────────────────────────────────────────
 
 function escapeHTML(str) {
   if (typeof str !== 'string') return String(str ?? '');
