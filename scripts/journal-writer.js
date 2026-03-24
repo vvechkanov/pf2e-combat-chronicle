@@ -26,7 +26,7 @@ export class JournalWriter {
     }
 
     // Create a new folder
-    const folderName = game.i18n.localize(`${MODULE_ID}.journal.folderName`);
+    const folderName = game.settings.get(MODULE_ID, 'journalFolderName');
     const folder = await Folder.create({
       name: folderName,
       type: 'JournalEntry',
@@ -75,13 +75,15 @@ export class JournalWriter {
         text: { content: `<pre>${escaped}</pre>` },
       }]);
 
-      const readablePageName = game.i18n.localize(`${MODULE_ID}.journal.readablePageName`);
-      const readableContent = formatEncounterHTML(encounterData);
-      await entry.createEmbeddedDocuments('JournalEntryPage', [{
-        name: readablePageName,
-        type: 'text',
-        text: { content: readableContent },
-      }]);
+      if (game.settings.get(MODULE_ID, 'generateReadableJournal')) {
+        const readablePageName = game.i18n.localize(`${MODULE_ID}.journal.readablePageName`);
+        const readableContent = formatEncounterHTML(encounterData);
+        await entry.createEmbeddedDocuments('JournalEntryPage', [{
+          name: readablePageName,
+          type: 'text',
+          text: { content: readableContent },
+        }]);
+      }
 
       const successMsg = game.i18n.format(`${MODULE_ID}.journal.saveSuccess`, { name: entryName });
       console.log(`${MODULE_ID} | ${successMsg}`);

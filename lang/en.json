@@ -1,6 +1,20 @@
 {
   "pf2e-combat-chronicle": {
     "title": "PF2e Combat Chronicle",
+    "settings": {
+      "autoSave": {
+        "name": "Auto-save to Journal",
+        "hint": "Automatically save encounter data to a JournalEntry when combat ends."
+      },
+      "generateReadableJournal": {
+        "name": "Generate human-readable journal",
+        "hint": "Create a formatted Combat Log page in addition to the raw JSON page."
+      },
+      "journalFolderName": {
+        "name": "Journal folder name",
+        "hint": "Name of the folder where encounter journals are stored."
+      }
+    },
     "journal": {
       "folderName": "Combat Chronicle",
       "entryPrefix": "Encounter",
