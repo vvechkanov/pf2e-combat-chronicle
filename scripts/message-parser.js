@@ -54,13 +54,13 @@ export class MessageParser {
     if (!message.isRoll && !origin.type) return null;
 
     const actionType = this.#classifyAction(pf2e, contextType, origin);
-    const actionName = this.#extractActionName(pf2e, origin, contextType);
+    const actionName = this.#extractActionName(pf2e, origin, contextType, message.content);
     const targets = this.#extractTargets(pf2e);
     const roll = message.rolls?.[0] ?? null;
 
     const rawTitle = context.title ?? null;
     const cleanTitle = rawTitle ? this.#stripHTML(rawTitle).trim() : null;
-    const itemName = this.#extractItemName(pf2e, origin, cleanTitle);
+    const itemName = this.#extractItemName(pf2e, origin, cleanTitle, message.content);
 
     return {
       action_name: actionName,
@@ -99,7 +99,7 @@ export class MessageParser {
     const total = roll?.total ?? 0;
     const targets = this.#extractTargets(pf2e);
 
-    const isHealing = this.#isHealingRoll(pf2e);
+    const isHealing = this.#isHealingRoll(pf2e, roll);
 
     return {
       _type: 'damage-enrichment',
@@ -170,9 +170,27 @@ export class MessageParser {
     return 'other';
   }
 
-  #extractActionName(pf2e, origin, contextType) {
+  #extractActionName(pf2e, origin, contextType, messageContent) {
     if (origin.name) return origin.name;
     if (pf2e.casting?.name) return pf2e.casting.name;
+
+    // Embedded spell (scrolls/wands) has full item data including name
+    if (pf2e.casting?.embeddedSpell?.name) return pf2e.casting.embeddedSpell.name;
+
+    // Resolve item name from world via UUID (sync Foundry API)
+    if (origin.uuid && typeof globalThis.fromUuidSync === 'function') {
+      try {
+        const item = globalThis.fromUuidSync(origin.uuid);
+        if (item?.name) return item.name;
+      } catch { /* item may not exist or be inaccessible */ }
+    }
+
+    // Parse spell name from message HTML content (spell card uses <h3>SpellName</h3>)
+    if (messageContent) {
+      const h3Match = messageContent.match(/<h3[^>]*>([^<]+)/);
+      if (h3Match?.[1]?.trim()) return h3Match[1].trim();
+    }
+
     if (contextType) return contextType;
     return 'Unknown';
   }
@@ -180,12 +198,26 @@ export class MessageParser {
   /**
    * Extract item name from multiple sources.
    */
-  #extractItemName(pf2e, origin, cleanTitle) {
+  #extractItemName(pf2e, origin, cleanTitle, messageContent) {
     if (origin.name) return origin.name;
     if (pf2e.casting?.name) return pf2e.casting.name;
     if (pf2e.strike?.name) return pf2e.strike.name;
     // Extract from origin item data if available
     if (origin.item?.name) return origin.item.name;
+    // Embedded spell name (scrolls/wands)
+    if (pf2e.casting?.embeddedSpell?.name) return pf2e.casting.embeddedSpell.name;
+    // Resolve from world UUID
+    if (origin.uuid && typeof globalThis.fromUuidSync === 'function') {
+      try {
+        const item = globalThis.fromUuidSync(origin.uuid);
+        if (item?.name) return item.name;
+      } catch { /* item may not exist */ }
+    }
+    // Parse from spell card HTML
+    if (messageContent) {
+      const h3Match = messageContent.match(/<h3[^>]*>([^<]+)/);
+      if (h3Match?.[1]?.trim()) return h3Match[1].trim();
+    }
     return null;
   }
 
@@ -240,12 +272,21 @@ export class MessageParser {
     return match?.[1] ?? null;
   }
 
-  #isHealingRoll(pf2e) {
-    const traits = pf2e.origin?.item?.system?.traits?.value;
-    if (Array.isArray(traits) && traits.includes('healing')) return true;
+  #isHealingRoll(pf2e, roll) {
+    // Primary: DamageRoll.kinds Set contains 'healing' (most reliable)
+    if (roll?.kinds?.has?.('healing')) return true;
 
-    // Also check for vitality trait (PF2e remaster term for positive healing)
-    if (Array.isArray(traits) && traits.includes('vitality')) return true;
+    // Fallback: context.traits includes healing/vitality trait slugs
+    const contextTraits = pf2e.context?.traits;
+    if (Array.isArray(contextTraits)) {
+      if (contextTraits.includes('healing') || contextTraits.includes('vitality')) return true;
+    }
+
+    // Fallback: roll options contain item:trait:healing
+    const options = pf2e.context?.options;
+    if (Array.isArray(options)) {
+      if (options.includes('item:trait:healing') || options.includes('item:trait:vitality')) return true;
+    }
 
     return false;
   }
