@@ -10,6 +10,12 @@ const DEGREE_LABELS = {
   'critical-failure': 'Critical Failure',
 };
 
+const SAVE_TYPE_LABELS = {
+  fortitude: 'Fortitude',
+  reflex: 'Reflex',
+  will: 'Will',
+};
+
 /**
  * Format encounter data as human-readable HTML.
  * @param {object} data — full encounter data object
@@ -20,14 +26,30 @@ export function formatEncounterHTML(data) {
   const parts = [];
   const combatStart = data.started_at ? new Date(data.started_at) : null;
 
+  // Build actor name lookup from initiative order
+  const actorNames = buildActorNameMap(data.initiative_order);
+
   parts.push(formatHeader(data, combatStart));
   parts.push(formatInitiativeTable(data.initiative_order));
 
   for (const round of data.rounds ?? []) {
-    parts.push(formatRound(round, combatStart));
+    parts.push(formatRound(round, combatStart, actorNames));
   }
 
   return parts.join('\n');
+}
+
+// ── Actor name map ──────────────────────────────────────────────────────────
+
+function buildActorNameMap(initiativeOrder) {
+  const map = new Map();
+  if (!initiativeOrder) return map;
+  for (const entry of initiativeOrder) {
+    if (entry.actor_id && entry.name) {
+      map.set(entry.actor_id, entry.name);
+    }
+  }
+  return map;
 }
 
 // ── Header ───────────────────────────────────────────────────────────────────
@@ -61,12 +83,12 @@ function formatInitiativeTable(order) {
 
 // ── Round ────────────────────────────────────────────────────────────────────
 
-function formatRound(round, combatStart) {
+function formatRound(round, combatStart, actorNames) {
   const elapsed = formatElapsedTag(combatStart, round.started_at);
   const parts = [`<h3>Round ${round.round_number}${elapsed}</h3>`];
 
   for (const turn of round.turns ?? []) {
-    parts.push(formatTurn(turn, combatStart));
+    parts.push(formatTurn(turn, combatStart, actorNames));
   }
 
   return parts.join('\n');
@@ -74,7 +96,7 @@ function formatRound(round, combatStart) {
 
 // ── Turn ─────────────────────────────────────────────────────────────────────
 
-function formatTurn(turn, combatStart) {
+function formatTurn(turn, combatStart, actorNames) {
   const name = escapeHTML(turn.combatant_name ?? 'Unknown');
   const hpLabel = turn.hp_start !== null && turn.hp_max !== null
     ? ` (HP: ${turn.hp_start}/${turn.hp_max})`
@@ -86,7 +108,7 @@ function formatTurn(turn, combatStart) {
   // Actions (skip move-type actions — we show aggregated movement separately)
   const displayActions = (turn.actions ?? []).filter(a => a.action_type !== 'move');
   if (displayActions.length > 0) {
-    const items = displayActions.map(a => `  <li>${formatAction(a, turn.hp_changes)}</li>`);
+    const items = displayActions.map(a => `  <li>${formatAction(a, turn.hp_changes, actorNames)}</li>`);
     parts.push(`<ul>\n${items.join('\n')}\n</ul>`);
   }
 
@@ -114,30 +136,45 @@ function formatTurn(turn, combatStart) {
 
 // ── Action formatting ────────────────────────────────────────────────────────
 
-function formatAction(action, hpChanges) {
+function formatAction(action, hpChanges, actorNames) {
   const parts = [];
 
-  // Action name with item name
-  let label = escapeHTML(action.action_name ?? 'Unknown');
-  if (action.item_name && action.item_name !== action.action_name) {
-    label += ` (${escapeHTML(action.item_name)}`;
-    if (action.map_penalty) label += `, MAP -${action.map_penalty * 5}`;
-    label += ')';
-  } else if (action.map_penalty) {
-    label += ` (MAP -${action.map_penalty * 5})`;
+  // Use title if available, otherwise build from action_name + item_name
+  let label;
+  if (action.title) {
+    label = escapeHTML(action.title);
+    if (action.map_penalty) label += ` (MAP -${action.map_penalty * 5})`;
+  } else {
+    label = escapeHTML(action.action_name ?? 'Unknown');
+    if (action.item_name && action.item_name !== action.action_name) {
+      label += ` (${escapeHTML(action.item_name)}`;
+      if (action.map_penalty) label += `, MAP -${action.map_penalty * 5}`;
+      label += ')';
+    } else if (action.map_penalty) {
+      label += ` (MAP -${action.map_penalty * 5})`;
+    }
   }
   parts.push(label);
 
-  // Targets
+  // Targets with AC/DC
   if (action.targets?.length) {
-    parts.push(`→ ${action.targets.map(escapeHTML).join(', ')}`);
+    const targetNames = action.targets.map(t => escapeHTML(t.name ?? t.actor_id ?? '?')).join(', ');
+    let targetStr = `→ ${targetNames}`;
+    // Show AC for attack rolls
+    if (action.dc && action.dc.slug === 'armor') {
+      targetStr += ` (AC ${action.dc.value})`;
+    }
+    parts.push(targetStr);
   }
 
-  // Roll result
+  // Roll result with DC for saving throws
   if (action.roll_result !== null && action.roll_result !== undefined) {
-    // Only show "vs AC" for attack-type actions
-    if (action.action_type === 'strike' || action.action_type === 'spell') {
-      parts.push(`${action.roll_result} vs AC`);
+    if (action.save_type) {
+      // Saving throw: show roll vs DC
+      const dcStr = action.dc ? ` vs DC ${action.dc.value}` : '';
+      parts.push(`${action.roll_result}${dcStr}`);
+    } else if (action.action_type === 'strike' || action.action_type === 'spell') {
+      parts.push(`${action.roll_result}`);
     } else {
       parts.push(`${action.roll_result}`);
     }
@@ -173,8 +210,23 @@ function formatAction(action, hpChanges) {
     parts.push(`healed ${action.healing_done} HP`);
   }
 
-  // Reaction tag
-  if (action.notes === 'reaction') {
+  // Persistent damage
+  if (action.applied_damage?.persistent?.length) {
+    const persistentParts = action.applied_damage.persistent.map(p => {
+      const type = p.damageType ? escapeHTML(p.damageType) : '';
+      const formula = p.formula ? escapeHTML(p.formula) : '';
+      return `${formula} ${type}`.trim();
+    }).filter(Boolean);
+    if (persistentParts.length) {
+      parts.push(`persistent: ${persistentParts.join(', ')}`);
+    }
+  }
+
+  // Reaction tag — show actor name instead of generic [Reaction]
+  if (action.notes === 'reaction' && action.actor_id) {
+    const reactorName = actorNames.get(action.actor_id) ?? action.actor_id;
+    parts.push(`[${escapeHTML(reactorName)}]`);
+  } else if (action.notes === 'reaction') {
     parts.push('[Reaction]');
   }
 
@@ -192,7 +244,9 @@ function findActualHPDelta(action, hpChanges) {
 
   // Find an HP change whose actor_name matches one of the action's targets
   for (const target of action.targets) {
-    const match = hpChanges.find(hc => hc.actor_name === target);
+    const targetName = target.name ?? null;
+    if (!targetName) continue;
+    const match = hpChanges.find(hc => hc.actor_name === targetName);
     if (match) return match.delta;
   }
 
