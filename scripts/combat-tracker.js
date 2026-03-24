@@ -84,6 +84,50 @@ export class CombatTracker {
     this.#healthTracker.onHPChange(actor, changes);
   }
 
+  /**
+   * Called from the createItem hook when an item is added to an actor.
+   * @param {Item} item
+   * @param {object} options
+   * @param {string} userId
+   */
+  onItemCreated(item, options, userId) {
+    if (!this.#encounter) return;
+    this.#effectTracker.onEffectCreated(item, options, userId);
+  }
+
+  /**
+   * Called from the deleteItem hook when an item is removed from an actor.
+   * @param {Item} item
+   * @param {object} options
+   * @param {string} userId
+   */
+  onItemDeleted(item, options, userId) {
+    if (!this.#encounter) return;
+    this.#effectTracker.onEffectDeleted(item, options, userId);
+  }
+
+  /**
+   * Called from the preUpdateItem hook to capture old values before update.
+   * @param {Item} item
+   * @param {object} changes
+   */
+  onItemPreUpdate(item, changes) {
+    if (!this.#encounter) return;
+    this.#effectTracker.capturePreUpdateValue(item, changes);
+  }
+
+  /**
+   * Called from the updateItem hook when an item on an actor is updated.
+   * @param {Item} item
+   * @param {object} changes
+   * @param {object} options
+   * @param {string} userId
+   */
+  onItemUpdated(item, changes, options, userId) {
+    if (!this.#encounter) return;
+    this.#effectTracker.onEffectUpdated(item, changes, options, userId);
+  }
+
   endCombat(combat, options, userId) {
     if (!this.#encounter || combat.id !== this.#combatId) return;
 
@@ -145,6 +189,7 @@ export class CombatTracker {
       hp_changes: [],
       effects_start: effectsSnap,
       effects_end: [],
+      effect_events: [],
       effects_gained: [],
       effects_lost: [],
       effects_changed: [],
@@ -189,6 +234,9 @@ export class CombatTracker {
 
     const turn = round.turns[round.turns.length - 1];
     if (turn.effects_end.length > 0) return; // already finalized
+
+    // Attach accumulated effect events to this turn
+    turn.effect_events = this.#effectTracker.drainEvents();
 
     const actor = game.actors?.get(turn.actor_id);
     if (actor) {
