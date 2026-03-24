@@ -2,12 +2,14 @@ import { HealthTracker } from './health-tracker.js';
 import { EffectTracker } from './effect-tracker.js';
 
 const MODULE_ID = 'pf2e-combat-chronicle';
+const SAVE_DEBOUNCE_MS = 1000;
 
 export class CombatTracker {
   #encounter = null;
   #combatId = null;
   #healthTracker = new HealthTracker();
   #effectTracker = new EffectTracker();
+  #saveTimeout = null;
 
   get currentEncounter() {
     return this.#encounter;
@@ -47,6 +49,7 @@ export class CombatTracker {
     this.#ensureTurn(combat);
 
     console.log(`${MODULE_ID} | Combat started: ${this.#encounter.encounter_id}`);
+    this.#scheduleSave();
   }
 
   onTurnChange(combat, prior, current) {
@@ -67,11 +70,13 @@ export class CombatTracker {
 
     this.#ensureRound(combat);
     this.#ensureTurn(combat);
+    this.#scheduleSave();
   }
 
   onRoundChange(combat, updateData, updateOptions) {
     if (!this.#encounter || combat.id !== this.#combatId) return;
     this.#ensureRound(combat);
+    this.#scheduleSave();
   }
 
   /**
@@ -82,10 +87,17 @@ export class CombatTracker {
   onActorHPUpdate(actor, changes) {
     if (!this.#encounter) return;
     this.#healthTracker.onHPChange(actor, changes);
+    this.#scheduleSave();
   }
 
   endCombat(combat, options, userId) {
     if (!this.#encounter || combat.id !== this.#combatId) return;
+
+    // Cancel any pending debounced save — combat is being deleted
+    if (this.#saveTimeout) {
+      clearTimeout(this.#saveTimeout);
+      this.#saveTimeout = null;
+    }
 
     // Finalize HP and effects for the last active turn
     this.#finalizeCurrentTurnHP(combat, combat.round);
@@ -104,6 +116,63 @@ export class CombatTracker {
     this.#encounter = null;
     this.#combatId = null;
   }
+
+  /**
+   * Restore tracker state from Combat document flags after a page reload.
+   * @param {Combat} combat — the active combat with persisted flags
+   */
+  restoreState(combat) {
+    const encounterState = combat.getFlag(MODULE_ID, 'encounterState');
+    if (!encounterState) return;
+
+    this.#combatId = combat.id;
+    this.#encounter = encounterState;
+
+    const healthState = combat.getFlag(MODULE_ID, 'healthState');
+    this.#healthTracker.restoreState(healthState);
+
+    const effectState = combat.getFlag(MODULE_ID, 'effectState');
+    this.#effectTracker.restoreState(effectState);
+
+    console.log(`${MODULE_ID} | Restored combat state: ${this.#encounter.encounter_id}`);
+  }
+
+  // ── Persistence ──────────────────────────────────────────────
+
+  /**
+   * Schedule a debounced save of the current state to Combat flags.
+   */
+  #scheduleSave() {
+    if (!this.#encounter || !this.#combatId) return;
+    if (this.#saveTimeout) clearTimeout(this.#saveTimeout);
+    this.#saveTimeout = setTimeout(() => this.#persistState(), SAVE_DEBOUNCE_MS);
+  }
+
+  /**
+   * Persist current encounter, health, and effect state to the Combat document.
+   * Uses a single update call to minimize DB writes.
+   */
+  async #persistState() {
+    this.#saveTimeout = null;
+    if (!this.#encounter || !this.#combatId) return;
+
+    const combat = game.combats?.get(this.#combatId);
+    if (!combat) return;
+
+    try {
+      await combat.update({
+        [`flags.${MODULE_ID}`]: {
+          encounterState: this.#encounter,
+          healthState: this.#healthTracker.serialize(),
+          effectState: this.#effectTracker.serialize(),
+        },
+      });
+    } catch (err) {
+      console.error(`${MODULE_ID} | Failed to persist combat state`, err);
+    }
+  }
+
+  // ── Round / Turn helpers ─────────────────────────────────────
 
   #ensureRound(combat) {
     const roundNum = combat.round;

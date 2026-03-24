@@ -89,6 +89,25 @@ export class EffectTracker {
   }
 
   /**
+   * Serialize internal state for persistence.
+   * @returns {{baselines: Array}}
+   */
+  serialize() {
+    return {
+      baselines: Array.from(this.#baselines.entries()),
+    };
+  }
+
+  /**
+   * Restore internal state from serialized data.
+   * @param {object} data — output of serialize()
+   */
+  restoreState(data) {
+    if (!data) return;
+    this.#baselines = new Map(data.baselines ?? []);
+  }
+
+  /**
    * Clear all tracked state (call when combat ends).
    */
   reset() {
