@@ -19,7 +19,8 @@ export function generateSummary(encounter) {
   const allActions = flattenActions(allTurns);
   const allHpChanges = flattenHpChanges(allTurns);
 
-  const totalRounds = encounter.rounds.length;
+  // Count only actual combat rounds (exclude round 0 which is pre-combat)
+  const totalRounds = encounter.rounds.filter(r => r.round_number > 0).length;
 
   // Pre-compute damage aggregates needed by multiple metrics
   const damageDealtByActor = computeDamageDealt(allActions, actorInfo);
@@ -118,7 +119,7 @@ function flattenHpChanges(allTurns) {
 // ── Global stats ────────────────────────────────────────────
 
 function computeGlobalStats(encounter, actorInfo, allTurns) {
-  const totalRounds = encounter.rounds.length;
+  const totalRounds = encounter.rounds.filter(r => r.round_number > 0).length;
   const combatDuration = computeDurationSeconds(encounter.started_at, encounter.ended_at);
   const xpResult = computeXP(actorInfo);
   const turnDurations = computeTurnDurations(allTurns, actorInfo);

@@ -24,13 +24,15 @@ export class MovementTracker {
    * @param {object} changes — the diff object from Foundry
    */
   onTokenMove(token, changes) {
-    const hasPositionChange = ('x' in changes) || ('y' in changes);
+    const src = changes._source ?? changes;
+    const hasPositionChange = ('x' in changes) || ('y' in changes) || ('x' in src) || ('y' in src);
     if (!hasPositionChange) return;
 
     const tokenId = token.id;
     const prev = this.#previousPosition.get(tokenId);
     if (!prev) {
       // No baseline — token wasn't tracked; set baseline now
+      console.log(`${MODULE_ID} | Movement: no baseline for ${token.name} (${tokenId}), setting now`);
       this.#previousPosition.set(tokenId, { x: token.x, y: token.y });
       return;
     }
@@ -89,6 +91,27 @@ export class MovementTracker {
     const movements = this.#pendingMovements;
     this.#pendingMovements = [];
     return movements;
+  }
+
+  /**
+   * Calculate distance from start to end position as a fallback when no movement events
+   * were captured via the hook. Uses the same grid-based calculation.
+   * @param {{x: number, y: number}} from
+   * @param {{x: number, y: number}} to
+   * @param {Scene|null} scene
+   * @returns {number} distance in feet
+   */
+  calculateFallbackDistance(from, to, scene) {
+    if (!from || !to) return 0;
+    if (from.x === to.x && from.y === to.y) return 0;
+    return this.#calculateDistance(from.x, from.y, to.x, to.y, scene);
+  }
+
+  /**
+   * Log current baselines for debugging.
+   */
+  debugBaselines() {
+    console.log(`${MODULE_ID} | Movement baselines:`, Object.fromEntries(this.#previousPosition));
   }
 
   /**
