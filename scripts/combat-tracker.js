@@ -329,7 +329,12 @@ export class CombatTracker {
     // Initialize HP, effects, and movement baselines for this actor's turn
     if (actor) this.#healthTracker.initBaseline(actor);
     if (actor) this.#effectTracker.initBaseline(actor);
-    if (combatant.token) this.#movementTracker.initBaseline(combatant.token);
+    if (combatant.token) {
+      this.#movementTracker.initBaseline(combatant.token);
+      console.log(`${MODULE_ID} | Movement baseline set for ${combatant.name} token=${combatant.token.id} pos=(${combatant.token.x},${combatant.token.y})`);
+    } else {
+      console.warn(`${MODULE_ID} | No token for combatant ${combatant.name}, movement won't be tracked`);
+    }
 
     const tokenPos = combatant.token ? { x: combatant.token.x, y: combatant.token.y } : null;
 
@@ -434,6 +439,19 @@ export class CombatTracker {
     // Attach accumulated movement events
     turn.movements = this.#movementTracker.drainMovements();
     turn.total_distance_ft = turn.movements.reduce((sum, m) => sum + m.distance_ft, 0);
+
+    // Fallback: if no movement events were captured but position changed, compute distance
+    if (turn.movements.length === 0 && turn.position_start && turn.position_end) {
+      const scene = combat.scene ?? null;
+      const fallback = this.#movementTracker.calculateFallbackDistance(
+        turn.position_start, turn.position_end, scene
+      );
+      if (fallback > 0) {
+        turn.total_distance_ft = fallback;
+        console.warn(`${MODULE_ID} | Used fallback distance for ${turn.combatant_name}: ${fallback} ft`);
+      }
+    }
+
     // Round total to 1 decimal
     turn.total_distance_ft = Math.round(turn.total_distance_ft * 10) / 10;
   }

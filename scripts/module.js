@@ -90,7 +90,9 @@ Hooks.once('ready', () => {
   });
 
   Hooks.on('updateToken', (token, changes, options, userId) => {
-    if (('x' in changes) || ('y' in changes)) {
+    // Foundry v13 may nest position in _source or at top level
+    const src = changes._source ?? changes;
+    if (('x' in changes) || ('y' in changes) || ('x' in src) || ('y' in src)) {
       tracker.onTokenMove(token, changes);
     }
   });
