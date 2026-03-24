@@ -28,61 +28,70 @@ export class MessageParser {
    * @returns {object|null}
    */
   parse(message) {
-    const pf2e = message.flags?.pf2e;
-    if (!pf2e) return null;
+    try {
+      const pf2e = message.flags?.pf2e;
+      if (!pf2e) return null;
 
-    const speakerActorId = message.speaker?.actor;
-    if (!speakerActorId) return null;
+      const speakerActorId = message.speaker?.actor;
+      if (!speakerActorId) return null;
 
-    const context = pf2e.context ?? {};
-    const contextType = context.type ?? null;
+      const context = pf2e.context ?? {};
+      const contextType = context.type ?? null;
 
-    if (contextType && SKIP_CONTEXT_TYPES.has(contextType)) return null;
+      if (contextType && SKIP_CONTEXT_TYPES.has(contextType)) return null;
 
-    // Damage rolls produce enrichments, not standalone actions
-    if (contextType === 'damage-roll') {
-      return this.#parseDamageRoll(message, pf2e);
+      // Damage rolls produce enrichments, not standalone actions
+      if (contextType === 'damage-roll') {
+        return this.#parseDamageRoll(message, pf2e);
+      }
+
+      // damage-taken messages: extract appliedDamage info
+      if (contextType === 'damage-taken') {
+        return this.#parseDamageTaken(message, pf2e);
+      }
+
+      // Require either a roll or an origin to treat as an action
+      const origin = pf2e.origin ?? {};
+      if (!message.isRoll && !origin.type) return null;
+
+      const actionType = this.#classifyAction(pf2e, contextType, origin);
+      const actionName = this.#extractActionName(pf2e, origin, contextType, message.content);
+      const actionCost = this.#extractActionCost(origin, actionType);
+      const targets = this.#extractTargets(pf2e);
+      const roll = message.rolls?.[0] ?? null;
+
+      const rawTitle = context.title ?? null;
+      const cleanTitle = rawTitle ? this.#stripHTML(rawTitle).trim() : null;
+      const itemName = this.#extractItemName(pf2e, origin, cleanTitle, message.content);
+
+      return {
+        action_name: actionName,
+        action_cost: actionCost,
+        action_type: actionType,
+        item_name: itemName,
+        item_type: origin.type ?? null,
+        targets,
+        roll_result: roll?.total ?? null,
+        roll_formula: roll?.formula ?? null,
+        degree_of_success: this.#normalizeOutcome(context.outcome),
+        damage_dealt: null,
+        damage_type: null,
+        healing_done: null,
+        map_penalty: this.#extractMapPenalty(context),
+        notes: null,
+        title: cleanTitle,
+        dc: context.dc ? { value: context.dc.value, slug: context.dc.slug ?? null } : null,
+        save_type: contextType === 'saving-throw' ? (context.statistic ?? context.slug ?? null) : null,
+        item_img: origin.img ?? origin.item?.img ?? null,
+        item_description: this.#extractDescription(origin),
+      };
+    } catch (err) {
+      console.error(`${MODULE_ID} | MessageParser.parse() threw an exception`, err, {
+        messageId: message?.id,
+        contextType: message?.flags?.pf2e?.context?.type ?? null,
+      });
+      return null;
     }
-
-    // damage-taken messages: extract appliedDamage info
-    if (contextType === 'damage-taken') {
-      return this.#parseDamageTaken(message, pf2e);
-    }
-
-    // Require either a roll or an origin to treat as an action
-    const origin = pf2e.origin ?? {};
-    if (!message.isRoll && !origin.type) return null;
-
-    const actionType = this.#classifyAction(pf2e, contextType, origin);
-    const actionName = this.#extractActionName(pf2e, origin, contextType, message.content);
-    const targets = this.#extractTargets(pf2e);
-    const roll = message.rolls?.[0] ?? null;
-
-    const rawTitle = context.title ?? null;
-    const cleanTitle = rawTitle ? this.#stripHTML(rawTitle).trim() : null;
-    const itemName = this.#extractItemName(pf2e, origin, cleanTitle, message.content);
-
-    return {
-      action_name: actionName,
-      action_cost: DEFAULT_ACTION_COST[actionType] ?? 0,
-      action_type: actionType,
-      item_name: itemName,
-      item_type: origin.type ?? null,
-      targets,
-      roll_result: roll?.total ?? null,
-      roll_formula: roll?.formula ?? null,
-      degree_of_success: this.#normalizeOutcome(context.outcome),
-      damage_dealt: null,
-      damage_type: null,
-      healing_done: null,
-      map_penalty: this.#extractMapPenalty(context),
-      notes: null,
-      title: cleanTitle,
-      dc: context.dc ? { value: context.dc.value, slug: context.dc.slug ?? null } : null,
-      save_type: contextType === 'saving-throw' ? (context.statistic ?? context.slug ?? null) : null,
-      item_img: origin.img ?? origin.item?.img ?? null,
-      item_description: this.#extractDescription(origin),
-    };
   }
 
   /**
@@ -95,24 +104,30 @@ export class MessageParser {
   // ---------------------------------------------------------------------------
 
   #parseDamageRoll(message, pf2e) {
-    const roll = message.rolls?.[0] ?? null;
-    const total = roll?.total ?? 0;
-    const targets = this.#extractTargets(pf2e);
+    try {
+      const roll = message.rolls?.[0] ?? null;
+      const total = roll?.total ?? 0;
+      const targets = this.#extractTargets(pf2e);
 
-    const isHealing = this.#isHealingRoll(pf2e, roll);
+      const isHealing = this.#isHealingRoll(pf2e, roll);
 
-    return {
-      _type: 'damage-enrichment',
-      damage_dealt: isHealing ? null : total,
-      damage_type: this.#extractDamageType(roll, pf2e),
-      healing_done: isHealing ? total : null,
-      targets,
-      roll_result: total,
-      strike_name: pf2e.strike?.name ?? null,
-    };
+      return {
+        _type: 'damage-enrichment',
+        damage_dealt: isHealing ? null : total,
+        damage_type: this.#extractDamageType(roll, pf2e),
+        healing_done: isHealing ? total : null,
+        targets,
+        roll_result: total,
+        strike_name: pf2e.strike?.name ?? null,
+      };
+    } catch (err) {
+      console.error(`${MODULE_ID} | #parseDamageRoll threw`, err, { messageId: message?.id });
+      return null;
+    }
   }
 
   #parseDamageTaken(message, pf2e) {
+    try {
     const applied = pf2e.appliedDamage;
     if (!applied) return null;
 
@@ -143,6 +158,10 @@ export class MessageParser {
         final_hp: applied.updates?.find(u => u.path === 'system.attributes.hp.value')?.value ?? null,
       },
     };
+    } catch (err) {
+      console.error(`${MODULE_ID} | #parseDamageTaken threw`, err, { messageId: message?.id });
+      return null;
+    }
   }
 
   #classifyAction(pf2e, contextType, origin) {
@@ -163,6 +182,18 @@ export class MessageParser {
     if (contextType === 'counteract-check') {
       return originType === 'spell' ? 'spell' : 'skill';
     }
+
+    // Flat checks (concealment, persistent damage recovery)
+    if (contextType === 'flat-check') return 'skill';
+
+    // Self-effect actions (Raise Shield, etc.)
+    if (contextType === 'self-effect') return originType === 'spell' ? 'spell' : 'skill';
+
+    // Spell casting (non-attack)
+    if (contextType === 'spell-cast') return 'spell';
+
+    // Generic checks
+    if (contextType === 'check') return 'skill';
 
     // Move and interact — check origin slug or slugified name
     const slug = origin.slug ?? this.#slugify(origin.name);
@@ -194,6 +225,7 @@ export class MessageParser {
     }
 
     if (contextType) return contextType;
+    console.warn(`${MODULE_ID} | Could not extract action name`, { originType: origin.type, contextType });
     return 'Unknown';
   }
 
@@ -325,6 +357,24 @@ export class MessageParser {
       }
     }
     return null;
+  }
+
+  #extractActionCost(origin, actionType) {
+    // 1. Embedded item data in flags
+    const embeddedCost = origin.item?.system?.actions?.value;
+    if (embeddedCost != null) return Number(embeddedCost);
+
+    // 2. Resolve item from world UUID
+    if (origin.uuid && typeof globalThis.fromUuidSync === 'function') {
+      try {
+        const item = globalThis.fromUuidSync(origin.uuid);
+        const resolvedCost = item?.system?.actions?.value;
+        if (resolvedCost != null) return Number(resolvedCost);
+      } catch { /* item may not exist */ }
+    }
+
+    // 3. Fallback to defaults
+    return DEFAULT_ACTION_COST[actionType] ?? 0;
   }
 
   #slugify(name) {

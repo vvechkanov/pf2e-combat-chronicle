@@ -70,6 +70,7 @@ export class HealthTracker {
       temp_hp_before: tempBefore,
       temp_hp_after: tempAfter,
       delta,
+      negativeHealing: actor?.system?.attributes?.hp?.negativeHealing ?? false,
       source: null,
       damage_type: null,
     };

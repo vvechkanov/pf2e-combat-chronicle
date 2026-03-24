@@ -455,7 +455,9 @@ function formatActiveEffects(effectsStart) {
     if (eff.value !== null && eff.value !== undefined) {
       label += ` ${eff.value}`;
     }
-    const typeClass = eff.type === 'condition' ? 'cc-effect-tag--condition' : 'cc-effect-tag--effect';
+    const typeClass = eff.type === 'condition' ? 'cc-effect-tag--condition'
+      : eff.type === 'buff' ? 'cc-effect-tag--buff'
+      : 'cc-effect-tag--effect';
     return `<span class="cc-effect-tag ${typeClass}">${label}</span>`;
   });
 

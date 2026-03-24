@@ -32,6 +32,15 @@ Hooks.once('init', () => {
     type: String,
     default: 'Combat Chronicle',
   });
+
+  game.settings.register(MODULE_ID, 'rawDataCollection', {
+    name: `${MODULE_ID}.settings.rawDataCollection.name`,
+    hint: `${MODULE_ID}.settings.rawDataCollection.hint`,
+    scope: 'world',
+    config: true,
+    type: Boolean,
+    default: false,
+  });
 });
 
 Hooks.once('ready', () => {
