@@ -4,6 +4,12 @@ export class EffectTracker {
   /** @type {Map<string, Array>} */
   #baselines = new Map();
 
+  /** @type {Array<object>} Pending effect events for the current turn */
+  #pendingEvents = [];
+
+  /** @type {Map<string, number|null>} Pre-update values captured before updateItem */
+  #preUpdateValues = new Map();
+
   /**
    * Take a snapshot of an actor's current effects and conditions.
    * @param {Actor} actor
@@ -89,10 +95,155 @@ export class EffectTracker {
   }
 
   /**
+   * Handle an effect/condition being created on an actor.
+   * @param {Item} item — the created item
+   * @param {object} options
+   * @param {string} userId
+   */
+  onEffectCreated(item, options, userId) {
+    if (item.type !== 'condition' && item.type !== 'effect') return null;
+    const event = {
+      event_type: 'applied',
+      effect_name: item.name,
+      effect_type: item.type,
+      slug: item.system?.slug ?? null,
+      value: item.system?.value?.value ?? null,
+      old_value: null,
+      new_value: item.system?.value?.value ?? null,
+      actor_id: item.actor?.id ?? null,
+      actor_name: item.actor?.name ?? null,
+      timestamp: new Date().toISOString(),
+      round: game.combat?.round ?? null,
+      turn: game.combat?.turn ?? null,
+    };
+    this.#pendingEvents.push(event);
+    console.log(`${MODULE_ID} | Effect applied: ${event.effect_name} on ${event.actor_name}`);
+    return event;
+  }
+
+  /**
+   * Handle an effect/condition being removed from an actor.
+   * @param {Item} item — the deleted item
+   * @param {object} options
+   * @param {string} userId
+   */
+  onEffectDeleted(item, options, userId) {
+    if (item.type !== 'condition' && item.type !== 'effect') return null;
+    const event = {
+      event_type: 'removed',
+      effect_name: item.name,
+      effect_type: item.type,
+      slug: item.system?.slug ?? null,
+      value: item.system?.value?.value ?? null,
+      old_value: item.system?.value?.value ?? null,
+      new_value: null,
+      actor_id: item.actor?.id ?? null,
+      actor_name: item.actor?.name ?? null,
+      timestamp: new Date().toISOString(),
+      round: game.combat?.round ?? null,
+      turn: game.combat?.turn ?? null,
+    };
+    this.#pendingEvents.push(event);
+    console.log(`${MODULE_ID} | Effect removed: ${event.effect_name} from ${event.actor_name}`);
+    return event;
+  }
+
+  /**
+   * Capture old value before an effect/condition update is applied.
+   * Call from preUpdateItem hook.
+   * @param {Item} item — the item before the update
+   * @param {object} changes — the change delta
+   */
+  capturePreUpdateValue(item, changes) {
+    if (item.type !== 'condition' && item.type !== 'effect') return;
+    if (!foundry.utils.hasProperty(changes, 'system.value.value') &&
+        !foundry.utils.hasProperty(changes, 'system.duration')) return;
+    this.#preUpdateValues.set(item.id, item.system?.value?.value ?? null);
+  }
+
+  /**
+   * Handle an effect/condition being updated on an actor.
+   * Call from updateItem hook (post-update).
+   * @param {Item} item — the updated item (post-update state)
+   * @param {object} changes — the change delta
+   * @param {object} options
+   * @param {string} userId
+   */
+  onEffectUpdated(item, changes, options, userId) {
+    if (item.type !== 'condition' && item.type !== 'effect') return null;
+
+    const valueChanged = foundry.utils.hasProperty(changes, 'system.value.value');
+    const durationChanged = foundry.utils.hasProperty(changes, 'system.duration');
+    if (!valueChanged && !durationChanged) return null;
+
+    const oldValue = this.#preUpdateValues.get(item.id) ?? null;
+    this.#preUpdateValues.delete(item.id);
+
+    const newValue = item.system?.value?.value ?? null;
+
+    // Skip if value didn't actually change and no duration change
+    if (valueChanged && oldValue === newValue && !durationChanged) return null;
+
+    const event = {
+      event_type: 'changed',
+      effect_name: item.name,
+      effect_type: item.type,
+      slug: item.system?.slug ?? null,
+      value: newValue,
+      old_value: valueChanged ? oldValue : null,
+      new_value: valueChanged ? newValue : null,
+      actor_id: item.actor?.id ?? null,
+      actor_name: item.actor?.name ?? null,
+      timestamp: new Date().toISOString(),
+      round: game.combat?.round ?? null,
+      turn: game.combat?.turn ?? null,
+    };
+
+    this.#pendingEvents.push(event);
+    console.log(`${MODULE_ID} | Effect changed: ${event.effect_name} on ${event.actor_name} (${event.old_value} → ${event.new_value})`);
+    return event;
+  }
+
+  /**
+   * Drain accumulated effect events (returns and clears the pending list).
+   * @returns {Array<object>}
+   */
+  drainEvents() {
+    const events = this.#pendingEvents;
+    this.#pendingEvents = [];
+    return events;
+  }
+
+  /**
+   * Serialize internal state for persistence.
+   * @returns {{baselines: Array, pendingEvents: Array, preUpdateValues: Array}}
+   */
+  serialize() {
+    return {
+      baselines: Array.from(this.#baselines.entries()),
+      pendingEvents: this.#pendingEvents,
+      preUpdateValues: Array.from(this.#preUpdateValues.entries()),
+    };
+  }
+
+  /**
+   * Restore internal state from serialized data.
+   * @param {object} data — output of serialize()
+   */
+  restoreState(data) {
+    if (!data) return;
+    this.#baselines = new Map(data.baselines ?? []);
+    this.#pendingEvents = data.pendingEvents ?? [];
+    this.#preUpdateValues = new Map(data.preUpdateValues ?? []);
+  }
+
+  /**
    * Clear all tracked state (call when combat ends).
    */
   reset() {
     this.#baselines.clear();
+    this.#pendingEvents = [];
+    this.#preUpdateValues.clear();
   }
 
   /**
