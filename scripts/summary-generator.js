@@ -128,9 +128,7 @@ function computeGlobalStats(encounter, actorInfo, allTurns) {
     total_rounds: totalRounds,
     combat_duration_seconds: combatDuration,
     total_xp: xpResult.total_xp,
-    xp_per_player: xpResult.xp_per_player,
     party_level: xpResult.party_level,
-    adjusted_xp: xpResult.adjusted_xp,
     difficulty: xpResult.difficulty,
     avg_turn_duration_gm_seconds: turnDurations.avg_gm,
     avg_turn_duration_per_npc_type: turnDurations.per_npc_type,
@@ -151,7 +149,7 @@ function computeXP(actorInfo) {
     if (info.type === 'npc' && info.level !== null) npcs.push(info.level);
   }
 
-  if (pcs.length === 0) return { total_xp: 0, xp_per_player: 0, party_level: null, adjusted_xp: 0, difficulty: null };
+  if (pcs.length === 0) return { total_xp: 0, party_level: null, difficulty: null };
 
   const partyLevel = Math.round(pcs.reduce((s, l) => s + l, 0) / pcs.length);
   let totalXp = 0;
@@ -161,24 +159,21 @@ function computeXP(actorInfo) {
     totalXp += XP_TABLE[String(diff)] ?? 0;
   }
 
-  // Adjust XP budget for party size (PF2e CRB: calibrated for 4 PCs, ±20 per creature per PC)
-  const partySizeAdjustment = (pcs.length - 4) * npcs.length * 20;
-  const adjustedXp = totalXp + partySizeAdjustment;
+  // PF2e CRB Table 10-2: difficulty thresholds shift by ±20 per PC above/below 4
+  const thresholdAdjustment = (pcs.length - 4) * 20;
 
   return {
     total_xp: totalXp,
-    xp_per_player: pcs.length > 0 ? Math.floor(totalXp / pcs.length) : 0,
     party_level: partyLevel,
-    adjusted_xp: adjustedXp,
-    difficulty: classifyDifficulty(adjustedXp),
+    difficulty: classifyDifficulty(totalXp, thresholdAdjustment),
   };
 }
 
-function classifyDifficulty(adjustedXp) {
-  if (adjustedXp >= 200) return 'extreme';
-  if (adjustedXp >= 160) return 'severe';
-  if (adjustedXp >= 120) return 'moderate';
-  if (adjustedXp >= 80) return 'low';
+function classifyDifficulty(totalXp, thresholdAdjustment = 0) {
+  if (totalXp >= 200 + thresholdAdjustment) return 'extreme';
+  if (totalXp >= 160 + thresholdAdjustment) return 'severe';
+  if (totalXp >= 120 + thresholdAdjustment) return 'moderate';
+  if (totalXp >= 80 + thresholdAdjustment) return 'low';
   return 'trivial';
 }
 
@@ -304,7 +299,7 @@ function computeTimesTargeted(allActions, actorName, actorId) {
   let count = 0;
   for (const action of allActions) {
     if (action.actor_id === actorId) continue; // don't count self-targeting
-    if (action.targets && action.targets.some(t => t.name === actorName)) {
+    if (action.targets && action.targets.some(t => t.actor_id === actorId || (!t.actor_id && t.name === actorName))) {
       count++;
     }
   }
@@ -316,7 +311,7 @@ function computeDodgeMaster(allActions, actorName, actorId) {
   let total = 0;
   for (const action of allActions) {
     if (action.actor_id === actorId) continue;
-    if (!action.targets || !action.targets.some(t => t.name === actorName)) continue;
+    if (!action.targets || !action.targets.some(t => t.actor_id === actorId || (!t.actor_id && t.name === actorName))) continue;
     if (!action.degree_of_success) continue;
     total++;
     if (action.degree_of_success === 'failure' || action.degree_of_success === 'critical-failure') {

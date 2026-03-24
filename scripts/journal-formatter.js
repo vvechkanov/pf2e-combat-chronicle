@@ -353,12 +353,13 @@ function formatAction(action, hpChanges, actorNames) {
     }
   }
 
-  // Reaction tag
-  if (action.notes === 'reaction') {
+  // Reaction / out-of-turn tag
+  if (action.notes === 'reaction' || action.notes === 'out-of-turn') {
     const reactorName = action.actor_id
       ? escapeHTML(actorNames.get(action.actor_id) ?? action.actor_id)
-      : 'Reaction';
-    fragments.push(`<span class="cc-reaction">${reactorName}</span>`);
+      : 'Unknown';
+    const badge = action.notes === 'reaction' ? `${reactorName} (Reaction)` : reactorName;
+    fragments.push(`<span class="cc-reaction">${badge}</span>`);
   }
 
   const sep = ` <span class="cc-separator">—</span> `;

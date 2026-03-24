@@ -167,23 +167,33 @@ export class CombatTracker {
     });
 
     if (result._type === 'damage-enrichment') {
-      // Store attribution for subsequent HP changes
+      // Store attribution for subsequent HP changes (queue per target for AoE)
       if (result.targets) {
         for (const target of result.targets) {
           if (target.actor_id) {
-            this.#pendingAttribution.set(target.actor_id, {
+            const entry = {
               source: result.strike_name ?? null,
               damage_type: result.damage_type ?? null,
-            });
+            };
+            if (!this.#pendingAttribution.has(target.actor_id)) {
+              this.#pendingAttribution.set(target.actor_id, []);
+            }
+            this.#pendingAttribution.get(target.actor_id).push(entry);
           }
         }
       }
       this.#enrichLastAction(currentTurn, result);
     } else {
-      // Tag reactions (speaker is not the active combatant)
+      // Tag reactions: speaker is not the active combatant AND action looks like a reaction
       const activeCombatantActorId = combat.combatant?.actor?.id ?? null;
       if (activeCombatantActorId && speakerActorId !== activeCombatantActorId) {
-        result.notes = 'reaction';
+        // Check PF2e context options for reaction/free-action traits
+        const options = message.flags?.pf2e?.context?.options ?? [];
+        const hasReactionTrait = Array.isArray(options) && options.some(
+          o => o === 'item:trait:reaction' || o === 'action:trait:reaction' || o === 'self:action:slug:reactive-strike'
+        );
+        // If we can confirm it's a reaction from traits, mark it; otherwise mark as out-of-turn
+        result.notes = hasReactionTrait ? 'reaction' : 'out-of-turn';
       }
       result.actor_id = speakerActorId;
       currentTurn.actions.push(result);
@@ -316,6 +326,9 @@ export class CombatTracker {
       const effectState = combat.getFlag(MODULE_ID, 'effectState');
       this.#effectTracker.restoreState(effectState);
 
+      const movementState = combat.getFlag(MODULE_ID, 'movementState');
+      this.#movementTracker.restoreState(movementState);
+
       const rawState = combat.getFlag(MODULE_ID, 'rawCollectorState');
       this.#rawCollector.restoreState(rawState);
 
@@ -358,6 +371,7 @@ export class CombatTracker {
           encounterState: this.#encounter,
           healthState: this.#healthTracker.serialize(),
           effectState: this.#effectTracker.serialize(),
+          movementState: this.#movementTracker.serialize(),
           rawCollectorState: this.#rawCollector.serialize(),
         },
       });
@@ -459,13 +473,14 @@ export class CombatTracker {
     // Attach accumulated HP change events to this turn
     turn.hp_changes = this.#healthTracker.drainChanges();
 
-    // Apply pending source attribution to HP changes
+    // Apply pending source attribution to HP changes (consume from queue)
     for (const change of turn.hp_changes) {
-      const attribution = this.#pendingAttribution.get(change.actor_id);
-      if (attribution) {
+      const queue = this.#pendingAttribution.get(change.actor_id);
+      if (queue?.length) {
+        const attribution = queue.shift();
         change.source = attribution.source;
         change.damage_type = attribution.damage_type;
-        this.#pendingAttribution.delete(change.actor_id);
+        if (queue.length === 0) this.#pendingAttribution.delete(change.actor_id);
       }
     }
   }
@@ -480,7 +495,8 @@ export class CombatTracker {
     if (!round || round.turns.length === 0) return;
 
     const turn = round.turns[round.turns.length - 1];
-    if (turn.effects_end.length > 0) return; // already finalized
+    if (turn._effectsFinalized) return; // already finalized
+    turn._effectsFinalized = true;
 
     // Attach accumulated effect events to this turn
     turn.effect_events = this.#effectTracker.drainEvents();
@@ -566,9 +582,10 @@ export class CombatTracker {
       }
     }
 
-    // Second pass: fall back to most recent action without damage data
+    // Second pass: fall back to most recent strike/spell without damage data
     for (let i = turn.actions.length - 1; i >= 0; i--) {
       const action = turn.actions[i];
+      if (action.action_type !== 'strike' && action.action_type !== 'spell') continue;
       if (action.damage_dealt === null && action.healing_done === null) {
         action.damage_dealt = enrichment.damage_dealt;
         action.damage_type = enrichment.damage_type;

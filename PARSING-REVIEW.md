@@ -16,9 +16,11 @@ Review of all parsing code against the official PF2e system source code (`foundr
 | HIGH     | 1     | ✅ Fixed | save_type always null — wrong data path |
 | MEDIUM   | 4     | ✅ Fixed | Incorrect data paths, wrong type assumptions |
 | LOW      | 9     | 5 fixed, 3 deferred, 1 N/A | Dead code, missing context types, minor inaccuracies |
+| NEW      | 8     | ✅ Fixed (v0.5.0) | Full code review round 2 — see section below |
 
-**Fixed issues:** 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 13
-**Deferred:** 11 (effect tracker buff type), 12 (negativeHealing), 14 (XP party size)
+**Fixed issues (round 1):** 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 13
+**Fixed issues (round 2):** 14, 15, 16, 17, 18, 19, 20, 21
+**Deferred:** 11 (effect tracker buff type), 12 (negativeHealing)
 
 ---
 
@@ -207,9 +209,43 @@ Undead with `negativeHealing: true` receive healing from void damage and damage 
 
 Backward search for action without damage doesn't verify `strike_name` from the enrichment. If a reaction damage roll arrives, it may be attributed to the wrong action.
 
-### 14. XP not adjusted for party size (summary-generator.js)
+### 14. XP not adjusted for party size (summary-generator.js) — ✅ Fixed
 
 PF2e XP budget is designed for 4 PCs. For groups of different sizes, the encounter budget should be adjusted (+20 XP per additional PC, -20 per missing). The module simply divides total XP by PC count.
+
+**Fix:** Removed `xp_per_player` (PF2e gives full XP to each PC). Changed `adjustedXp` to threshold adjustment: difficulty thresholds shift by ±20 per PC delta from 4.
+
+---
+
+## Round 2 — Full Code Review (2026-03-24)
+
+### 15. `enrichLastAction` fallback too greedy (combat-tracker.js) — ✅ Fixed
+
+Second-pass fallback attached damage to ANY action without damage data (including skill checks). Restricted to `strike` and `spell` action types only.
+
+### 16. `computeTimesTargeted` / `computeDodgeMaster` match by name (summary-generator.js) — ✅ Fixed
+
+Matched targets by `actorName` string, causing false positives for duplicate creature names (e.g., "Skeleton Guard" ×2). Now matches by `actor_id` first, falls back to name only when ID is unavailable.
+
+### 17. `effects_end` finalization uses length check (combat-tracker.js) — ✅ Fixed
+
+`if (turn.effects_end.length > 0) return` — actor ending turn with 0 effects would allow re-finalization. Replaced with `_effectsFinalized` flag.
+
+### 18. MovementTracker not persisted (movement-tracker.js) — ✅ Fixed
+
+Unlike HealthTracker/EffectTracker, MovementTracker had no `serialize()`/`restoreState()`. Page reload mid-combat lost all movement baselines. Added persistence and wired into CombatTracker flag saves.
+
+### 19. Reaction detection overly broad (combat-tracker.js) — ✅ Fixed
+
+All out-of-turn actions were tagged as `reaction`. Eidolons, minions, GM adjustments all misclassified. Now checks PF2e `item:trait:reaction` / `action:trait:reaction` in context options. Confirmed reactions tagged `reaction`, others tagged `out-of-turn`.
+
+### 20. AoE pending attribution overwrites (combat-tracker.js) — ✅ Fixed
+
+`#pendingAttribution` Map stored one entry per actor_id. Fireball hitting 3 targets would overwrite attributions. Changed to queue (array per actor_id) with FIFO consumption.
+
+### 21. Movement uses Euclidean instead of grid distance (movement-tracker.js) — ✅ Fixed
+
+`Math.hypot()` gave wrong results for diagonal grid movement. PF2e uses 5-10-5 alternating diagonal rule on square grids. Now calculates Manhattan+diagonal distance for square grids, Euclidean for gridless/hex.
 
 ---
 

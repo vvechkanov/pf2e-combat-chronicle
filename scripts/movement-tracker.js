@@ -65,6 +65,8 @@ export class MovementTracker {
 
   /**
    * Calculate distance in feet between two pixel positions using scene grid settings.
+   * Uses grid-based calculation (Manhattan with 5-10-5 diagonal rule for square grids)
+   * to match PF2e movement rules. Falls back to Euclidean for gridless/hex scenes.
    * @param {number} x1
    * @param {number} y1
    * @param {number} x2
@@ -75,12 +77,31 @@ export class MovementTracker {
   #calculateDistance(x1, y1, x2, y2, scene) {
     const gridSize = scene?.grid?.size ?? 100;
     const gridDistance = scene?.grid?.distance ?? 5;
+    const gridType = scene?.grid?.type ?? 1; // 0 = gridless, 1 = square, 2+ = hex
 
-    const pixelDist = Math.hypot(x2 - x1, y2 - y1);
-    const gridSquares = pixelDist / gridSize;
-    const distanceFt = Math.round(gridSquares * gridDistance * 10) / 10;
+    if (gridType === 0) {
+      // Gridless: use Euclidean distance
+      const pixelDist = Math.hypot(x2 - x1, y2 - y1);
+      return Math.round(pixelDist / gridSize * gridDistance * 10) / 10;
+    }
 
-    return distanceFt;
+    if (gridType >= 2) {
+      // Hex grids: use Euclidean as reasonable approximation
+      const pixelDist = Math.hypot(x2 - x1, y2 - y1);
+      return Math.round(pixelDist / gridSize * gridDistance * 10) / 10;
+    }
+
+    // Square grid: use PF2e 5-10-5 diagonal rule (Chebyshev-like)
+    const dx = Math.round(Math.abs(x2 - x1) / gridSize);
+    const dy = Math.round(Math.abs(y2 - y1) / gridSize);
+    const straight = Math.abs(dx - dy);
+    const diag = Math.min(dx, dy);
+
+    // 5-10-5 rule: odd diagonals cost 1 square, even diagonals cost 2 squares
+    const diagCost = Math.floor(diag / 2) * 3 + Math.ceil(diag / 2);
+    const totalSquares = straight + diagCost;
+
+    return Math.round(totalSquares * gridDistance * 10) / 10;
   }
 
   /**
@@ -108,10 +129,24 @@ export class MovementTracker {
   }
 
   /**
-   * Log current baselines for debugging.
+   * Serialize internal state for persistence.
+   * @returns {{previousPosition: Array, pendingMovements: Array}}
    */
-  debugBaselines() {
-    console.log(`${MODULE_ID} | Movement baselines:`, Object.fromEntries(this.#previousPosition));
+  serialize() {
+    return {
+      previousPosition: Array.from(this.#previousPosition.entries()),
+      pendingMovements: [...this.#pendingMovements],
+    };
+  }
+
+  /**
+   * Restore internal state from serialized data.
+   * @param {object} data — output of serialize()
+   */
+  restoreState(data) {
+    if (!data) return;
+    this.#previousPosition = new Map(data.previousPosition ?? []);
+    this.#pendingMovements = data.pendingMovements ?? [];
   }
 
   /**
