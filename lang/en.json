@@ -1,5 +1,13 @@
 {
   "pf2e-combat-chronicle": {
-    "title": "PF2e Combat Chronicle"
+    "title": "PF2e Combat Chronicle",
+    "journal": {
+      "folderName": "Combat Chronicle",
+      "entryPrefix": "Encounter",
+      "pageName": "Encounter JSON",
+      "saveSuccess": "Encounter saved to journal: {name}",
+      "saveError": "Failed to save encounter to journal",
+      "noData": "No encounter data to save"
+    }
   }
 }
