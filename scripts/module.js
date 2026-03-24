@@ -60,6 +60,22 @@ Hooks.once('ready', () => {
     }
   });
 
+  Hooks.on('createItem', (item, options, userId) => {
+    tracker.onItemCreated(item, options, userId);
+  });
+
+  Hooks.on('deleteItem', (item, options, userId) => {
+    tracker.onItemDeleted(item, options, userId);
+  });
+
+  Hooks.on('preUpdateItem', (item, changes, options, userId) => {
+    tracker.onItemPreUpdate(item, changes);
+  });
+
+  Hooks.on('updateItem', (item, changes, options, userId) => {
+    tracker.onItemUpdated(item, changes, options, userId);
+  });
+
   Hooks.on('createChatMessage', (message, options, userId) => {
     tracker.onChatMessage(message);
   });
